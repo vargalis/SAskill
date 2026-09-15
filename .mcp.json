@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "secureaccess": {
+      "command": "python",
+      "args": [
+        "-m",
+        "secureaccess_mcp"
+      ],
+      "env": {
+        "SECUREACCESS_BUILD_ID": "0.1.0+codex.20260915064608"
+      }
+    }
+  }
+}

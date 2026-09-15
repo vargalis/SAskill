@@ -1,0 +1,26 @@
+# Public configuration only. No password or PSK fields are accepted.
+prefix: SSE
+isp_gateway: 192.0.2.1
+router_wan_ip: 192.0.2.2
+management_prefixes:
+  - 10.10.10.12/32
+protected_prefixes:
+  - 0.0.0.0/0
+crypto:
+  ike_encryption: aes-gcm-256
+  prf: sha256
+  dh_groups: [19, 20]
+  esp: esp-gcm-256
+  ike_lifetime: 86400
+  ipsec_lifetime: 3600
+  dpd_interval: 10
+  dpd_retries: 3
+tunnels:
+  - tunnel_id: 100
+    headend: 198.51.100.20
+    local_identity: replace-with-tunnel-id@example.sse.cisco.com
+    source_interface: GigabitEthernet0/0/0
+    unnumbered_interface: GigabitEthernet0/0/0
+    mtu: 1400
+    tcp_mss: 1350
+    distance: 1
