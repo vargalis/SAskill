@@ -15,7 +15,7 @@ def filled(mode='advanced'):
               'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
               'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
               'ingress_interface':{'value':'GigabitEthernet0/0/1'},'pbr':{'failure_behavior':'normal-routing'},
-              'tunnel':{'interface_name':'Tunnel100','action':'create','headend':'203.0.113.20','local_identity':'test@example.com','source_interface':'GigabitEthernet0/0/0','address':'172.16.0.1/30','mtu':'1400','tcp_mss':'1350','distance':'1'}}
+              'tunnel':{'interface_name':'Tunnel100','action':'create','headend':'203.0.113.20','local_identity':'test@example.com','source_interface':'GigabitEthernet0/0/0','address':'172.16.0.1/30','mtu':'1390','tcp_mss':'1350','distance':'1'}}
     supplied['crypto']={k:('|'.join(map(str,v)) if isinstance(v,list) else str(v)) for k,v in CryptoParameters().model_dump().items() if v is not None}
     for row in rows: row['value']=supplied.get(row['section'],{}).get(row['field'],row['value'])
     return rows
@@ -63,6 +63,22 @@ class Checks(unittest.TestCase):
             if change=='formula': rows[0]['value']='=EXTERNAL()'
             r=import_configuration_csv(encode(rows),[1])
             self.assertFalse(r['valid']);self.assertNotIn('DO-NOT-ECHO',str(r))
+    def test_field_specific_validation_errors(self):
+        cases=[
+            ('device','host','not-an-ip','device.1.host: enter an IPv4 address'),
+            ('crypto','dh_groups','19|14','crypto.1.dh_groups: enter unique supported groups'),
+            ('source_prefix','value','10.10.10.1/24','source_prefix.1.value: enter canonical IPv4 CIDR'),
+            ('ingress_interface','value','Loopback0','ingress_interface.1.value: enter a physical or VLAN'),
+            ('tunnel','local_identity','invalid','tunnel.1.local_identity: enter the portal Tunnel ID/email'),
+            ('tunnel','mtu','1400','tunnel.1.mtu: enter an integer from 576 to 1390'),
+        ]
+        for section,field,bad,expected in cases:
+            with self.subTest(field=field,bad=bad):
+                rows=filled()
+                next(row for row in rows if row['section']==section and row['field']==field)['value']=bad
+                result=import_configuration_csv(encode(rows),[1])
+                self.assertFalse(result['valid'])
+                self.assertTrue(any(expected in error for error in result['errors']),result)
     def test_topology_and_occupied_conflicts(self):
         self.assertFalse(import_configuration_csv(encode(filled()),[100])['valid'])
         rows=filled()
@@ -73,6 +89,19 @@ class Checks(unittest.TestCase):
         rows=filled();source=next(r for r in rows if r['section']=='source_prefix')
         rows.append({**source,'item':'2','value':'10.10.11.0/24'})
         self.assertEqual(len(import_configuration_csv(encode(rows),[1])['provisioning_spec']['pbr']['source_prefixes']),2)
+    def test_additional_tunnel_inherits_common_first_tunnel_fields(self):
+        rows=filled()
+        first=[row for row in rows if row['section']=='tunnel']
+        second=[]
+        replacements={'interface_name':'Tunnel101','headend':'203.0.113.21','local_identity':'test2@example.com','address':'172.16.0.5/30','source_interface':''}
+        for row in first:
+            copied={**row,'item':'2'}
+            if copied['field'] in replacements: copied['value']=replacements[copied['field']]
+            second.append(copied)
+        result=import_configuration_csv(encode(rows+second),[1])
+        self.assertTrue(result['valid'],result)
+        self.assertIn('tunnel.2.source_interface',result['inherited_fields'])
+        self.assertEqual(result['provisioning_spec']['tunnels'][1]['source_interface'],'GigabitEthernet0/0/0')
     def test_ftd_never_renders_iosxe(self):
         text=configuration_csv_template('ftd')['csv_text']
         r=import_configuration_csv(text)

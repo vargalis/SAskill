@@ -2,6 +2,7 @@
 import csv
 import io
 import re
+from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from pydantic import ValidationError
 from .provisioning import ProvisioningSpec, CryptoParameters, render_nonsecret
 from .netconf_renderer import render_netconf
@@ -84,6 +85,126 @@ BASIC_DEFAULTS = {
     ('tunnel', 'tcp_mss'): '1350',
     ('tunnel', 'distance'): '1',
 }
+TUNNEL_INHERITED_FIELDS = ('source_interface','unnumbered_interface','mtu','tcp_mss')
+
+INTERFACE_PATTERN = re.compile(r'^(GigabitEthernet|Loopback|Vlan)[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?$')
+IDENTITY_PATTERN = re.compile(r'^[A-Za-z0-9_.+\-]+@[A-Za-z0-9.\-]+$')
+TOKEN_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.+\-]{0,47}$')
+
+
+def _field_errors(cells, row_numbers, platform):
+    """Return sanitized, row-specific validation errors for nonblank CSV values."""
+    errors=[]
+    def add(key, message):
+        row=row_numbers.get(key, 'generated')
+        errors.append(f"Row {row}: {key[0]}.{key[1]}.{key[2]}: {message}")
+    def integer(key, low, high):
+        value=cells.get(key,'')
+        if not value: return
+        if not value.isdigit() or not low <= int(value) <= high:
+            add(key,f'enter an integer from {low} to {high}')
+    def ipv4(key):
+        value=cells.get(key,'')
+        if not value: return
+        try: IPv4Address(value)
+        except ValueError: add(key,'enter an IPv4 address, for example 192.0.2.1')
+    def cidr(key, interface=False):
+        value=cells.get(key,'')
+        if not value: return
+        try:
+            (IPv4Interface if interface else IPv4Network)(value, **({} if interface else {'strict':True}))
+        except ValueError:
+            add(key,'enter canonical IPv4 CIDR notation, for example 10.10.10.0/24')
+    def choice(key, choices):
+        value=cells.get(key,'')
+        if value and value not in choices: add(key,'enter one of: '+', '.join(choices))
+
+    name=('device','1','name')
+    if cells.get(name) and not re.fullmatch(r'[A-Za-z0-9_.-]{1,48}',cells[name]):
+        add(name,'use 1-48 letters, digits, dots, underscores, or hyphens')
+    ipv4(('device','1','host'))
+    if platform == 'ftd':
+        choice(('ftd','1','manager_type'),('FMC','FDM'))
+        host=('ftd','1','manager_host')
+        if cells.get(host) and (len(cells[host])>253 or not re.fullmatch(r'[A-Za-z0-9.-]+',cells[host])):
+            add(host,'enter an IPv4 address or resolvable DNS hostname')
+        version=('ftd','1','version')
+        if cells.get(version) and not re.fullmatch(r'[0-9]+(?:\.[0-9A-Za-z-]+){1,3}',cells[version]):
+            add(version,'enter a release such as 7.6.1')
+        for field in ('device_id','template_name'):
+            key=('ftd','1',field)
+            if cells.get(key) and len(cells[key])>128: add(key,'use no more than 128 characters')
+        return errors
+
+    choice(('network','1','existing_objects_action'),('reject','replace_named'))
+    choice(('network','1','routing_mode'),('static','pbr'))
+    ipv4(('network','1','isp_gateway'));ipv4(('network','1','router_wan_ip'))
+    prefix=('network','1','prefix')
+    if cells.get(prefix) and not TOKEN_PATTERN.fullmatch(cells[prefix]):
+        add(prefix,'use 1-48 letters, digits, dots, underscores, plus signs, or hyphens')
+    choice(('crypto','1','ike_encryption'),('aes-gcm-256','aes-cbc-256'))
+    choice(('crypto','1','prf'),('sha256','sha384','sha512'))
+    choice(('crypto','1','integrity'),('sha256','sha384','sha512'))
+    choice(('crypto','1','esp'),('esp-gcm-256','esp-aes-256-sha256'))
+    choice(('crypto','1','pfs'),('19','20'))
+    dh=('crypto','1','dh_groups')
+    if cells.get(dh):
+        groups=cells[dh].split('|')
+        if any(group not in ('19','20') for group in groups) or len(groups)!=len(set(groups)):
+            add(dh,'enter unique supported groups separated by |, for example 19|20')
+    integer(('crypto','1','ike_lifetime'),120,86400)
+    integer(('crypto','1','ipsec_lifetime'),120,86400)
+    integer(('crypto','1','dpd_interval'),10,3600)
+    integer(('crypto','1','dpd_retries'),2,60)
+    encryption=cells.get(('crypto','1','ike_encryption'),'')
+    integrity=cells.get(('crypto','1','integrity'),'')
+    if encryption=='aes-gcm-256' and integrity:
+        add(('crypto','1','integrity'),'leave blank when using AES-GCM')
+    if encryption=='aes-cbc-256' and not integrity:
+        add(('crypto','1','integrity'),'CBC requires sha256, sha384, or sha512')
+    for key in cells:
+        section,item,field=key
+        if section in ('management_prefix','destination_prefix','source_prefix','bypass_prefix') and field=='value': cidr(key)
+        if section=='ingress_interface' and field=='value' and cells[key]:
+            if not INTERFACE_PATTERN.fullmatch(cells[key]) or cells[key].startswith('Loopback'):
+                add(key,'enter a physical or VLAN ingress interface, for example GigabitEthernet0/0/1')
+    for section in ('management_prefix','destination_prefix','source_prefix','bypass_prefix','ingress_interface'):
+        seen={}
+        for key,entry in cells.items():
+            if key[0]==section and key[2]=='value' and entry:
+                if entry in seen: add(key,f'duplicate value; it is already present in item {seen[entry]}')
+                else: seen[entry]=key[1]
+    choice(('pbr','1','failure_behavior'),('normal-routing',))
+    tunnel_items={item for section,item,field in cells if section=='tunnel'}
+    for item in tunnel_items:
+        base=lambda field: ('tunnel',item,field)
+        interface_name=base('interface_name')
+        if cells.get(interface_name) and not re.fullmatch(r'Tunnel[1-9][0-9]{0,9}',cells[interface_name]):
+            add(interface_name,'enter TunnelN with N from 1 to 2147483647')
+        elif cells.get(interface_name) and int(cells[interface_name][6:])>2147483647:
+            add(interface_name,'tunnel ID must not exceed 2147483647')
+        choice(base('action'),('create','reuse'));ipv4(base('headend'))
+        identity=base('local_identity')
+        if cells.get(identity) and (len(cells[identity])>255 or not IDENTITY_PATTERN.fullmatch(cells[identity])):
+            add(identity,'enter the portal Tunnel ID/email, for example tunnel-id@example.com')
+        for field in ('source_interface','unnumbered_interface'):
+            key=base(field)
+            if cells.get(key) and not INTERFACE_PATTERN.fullmatch(cells[key]):
+                add(key,'enter GigabitEthernet, Loopback, or Vlan followed by a valid interface number')
+        cidr(base('address'),interface=True);cidr(base('source_loopback_address'),interface=True)
+        loopback=base('source_loopback_address')
+        if cells.get(loopback):
+            try:
+                if IPv4Interface(cells[loopback]).network.prefixlen!=32: add(loopback,'a source loopback address must use /32')
+            except ValueError: pass
+        integer(base('mtu'),576,1390);integer(base('tcp_mss'),536,1350);integer(base('distance'),1,254)
+        choice(base('reuse_confirmed'),('true',))
+        scope=base('change_scope')
+        if len(cells.get(scope,''))>1000: add(scope,'use no more than 1000 characters')
+        mtu=cells.get(base('mtu'),'');mss=cells.get(base('tcp_mss'),'')
+        if mtu.isdigit() and mss.isdigit() and int(mss)>int(mtu)-40:
+            add(base('tcp_mss'),'must not exceed tunnel MTU minus 40 bytes')
+    return errors
 
 def configuration_csv_template(platform='iosxe', name='', host='', mode='advanced'):
     if platform not in ('iosxe', 'ftd'):
@@ -128,7 +249,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         reader=csv.DictReader(io.StringIO(csv_text.lstrip('\ufeff')),delimiter=';',strict=True)
         if reader.fieldnames!=COLUMNS:
             raise ValueError('Expected exact CSV header and semicolon delimiter')
-        cells={};errors=[]
+        cells={};row_numbers={};errors=[]
         for index,row in enumerate(reader,2):
             if index>2001: raise ValueError('Too many CSV rows')
             if None in row or any(v is None for v in row.values()): raise ValueError('Malformed CSV row')
@@ -139,20 +260,25 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
             key=(section,item,field)
             if key in cells: errors.append(f'Row {index}: duplicate field')
             if value.startswith(('=','+','-','@')): errors.append(f'Row {index}: formulas are not accepted')
+            if row['required'].strip() not in ('yes','no'): errors.append(f'Row {index}: required must be yes or no')
+            if not row['description'].strip(): errors.append(f'Row {index}: description must not be blank')
             cells[key]=value
+            row_numbers[key]=index
         def value(s,f): return cells.get((s,'1',f),'')
         platform=value('meta','platform')
-        if platform not in ('iosxe','ftd') or value('meta','schema_version')!='2':
-            raise ValueError('Unsupported platform/schema version')
+        if value('meta','schema_version')!='2':
+            errors.append(f"Row {row_numbers.get(('meta','1','schema_version'),'unknown')}: meta.1.schema_version: enter 2")
+        if platform not in ('iosxe','ftd'):
+            errors.append(f"Row {row_numbers.get(('meta','1','platform'),'unknown')}: meta.1.platform: enter iosxe or ftd")
         template_mode=value('meta','template_mode') or 'advanced'
         if template_mode not in ('basic','advanced'):
-            raise ValueError('Unsupported template mode')
+            errors.append(f"Row {row_numbers.get(('meta','1','template_mode'),'unknown')}: meta.1.template_mode: enter basic or advanced")
+        if errors: return {**base,'valid':False,'errors':errors}
         allowed={s:set(fields) for s,fields in SCALARS.items() if platform=='iosxe' or s in ('meta','device')}
         allowed.update({'ftd':set(FTD)} if platform=='ftd' else {**{s:{'value'} for s in LISTS},'pbr':set(PBR),'tunnel':set(TUNNEL)})
         for index,((s,i,f),v) in enumerate(cells.items(),2):
             if s not in allowed or f not in allowed[s] or (s not in LISTS and s!='tunnel' and i!='1'):
                 errors.append(f'Row {index}: unknown field or section/item')
-        if errors: return {**base,'valid':False,'errors':errors}
         if template_mode == 'basic' and platform == 'iosxe':
             for (section, field), default in BASIC_DEFAULTS.items():
                 if section == 'tunnel':
@@ -160,6 +286,21 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
                         cells.setdefault((section,item,field),default)
                 else:
                     cells.setdefault((section,'1',field),default)
+        inherited_fields=[]
+        if platform == 'iosxe':
+            tunnel_items=sorted({i for s,i,f in cells if s=='tunnel'},key=int)
+            if tunnel_items:
+                first=tunnel_items[0]
+                for field in TUNNEL_INHERITED_FIELDS:
+                    common=cells.get(('tunnel',first,field),'')
+                    if common:
+                        for item in tunnel_items[1:]:
+                            key=('tunnel',item,field)
+                            if not cells.get(key,''):
+                                cells[key]=common
+                                inherited_fields.append(f'tunnel.{item}.{field}')
+        errors.extend(_field_errors(cells,row_numbers,platform))
+        if errors: return {**base,'valid':False,'errors':errors,'inherited_fields':inherited_fields}
         missing=[]
         def required(s,fields,item='1'):
             for f,(_,needed,_) in fields.items():
@@ -194,6 +335,8 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
             t={f:v for (s,i,f),v in cells.items() if s=='tunnel' and i==item and v}
             name=t.pop('interface_name','');action=t.pop('action','')
             confirmed=t.pop('reuse_confirmed','');scope=t.pop('change_scope','')
+            if not name or not action:
+                continue
             if not re.fullmatch(r'Tunnel[1-9][0-9]{0,9}',name) or action not in ('create','reuse'):
                 errors.append(f'tunnel.{item}: choose TunnelN and create/reuse');continue
             number=int(name[6:]);t['tunnel_id']=number
@@ -205,7 +348,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
             if action=='reuse': blockers.append('Reuse confirmation is caller-held; inspect current parameters and reconcile existing interface/secret choices')
             if not t.get('address') and not t.get('unnumbered_interface'): missing.append(f'tunnel.{item}.address OR unnumbered_interface')
             tunnels.append(t);intent.append({'interface_name':name,'action':action,'change_scope':scope})
-        if missing or errors: return {**base,'valid':False,'missing_fields':missing,'errors':errors}
+        if missing or errors: return {**base,'valid':False,'missing_fields':missing,'errors':errors,'inherited_fields':inherited_fields}
         crypto={f:value('crypto',f) for f in SCALARS['crypto'] if value('crypto',f)}
         if 'dh_groups' in crypto: crypto['dh_groups']=[int(v.strip()) for v in crypto['dh_groups'].split('|')]
         if 'pfs' in crypto: crypto['pfs']=int(crypto['pfs'])
@@ -217,10 +360,11 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         from .wizard import Target
         target=Target.model_validate({'name':value('device','name'),'host':value('device','host')})
         xml=render_netconf(spec)
-        return {**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
+        return {**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'inherited_fields':inherited_fields,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
                 'tunnel_interface_intent':intent,'existing_objects_action':existing_action,'result':render_nonsecret(spec),'netconf_preview':xml,
                 'blockers':list(dict.fromkeys(blockers+['CSV approval is not device apply authorization']+xml['blockers']))}
     except ValidationError as error:
-        return {**base,'valid':False,'errors':['Invalid parameter: '+'.'.join(map(str,e['loc'])) for e in error.errors(include_input=False)]}
+        return {**base,'valid':False,'errors':[
+            'Invalid parameter '+'.'.join(map(str,e['loc']))+': '+e['msg'] for e in error.errors(include_input=False)]}
     except (ValueError,csv.Error):
         return {**base,'valid':False,'errors':['Invalid CSV structure, platform or field encoding']}

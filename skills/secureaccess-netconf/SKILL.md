@@ -19,6 +19,12 @@ field and its recommendation. Do not create the CSV until the user selects a mod
 Create a public template with create_configuration_csv and pass the selected mode. Read the locally filled
 CSV and send its text to preview_configuration_csv. Return missing fields and
 errors; do not invent headends, identities, crypto choices or interface selections.
+Present row-specific validation errors with the accepted format, values, or range;
+do not collapse them into a generic invalid-parameter response.
+For multiple tunnel items, explain that blank source_interface, unnumbered_interface,
+mtu, and tcp_mss values inherit from the first tunnel; report inherited_fields from
+the preview. Never inherit interface_name, headend, local_identity, address, action,
+or distance.
 Template mode is offline. Use native local setup for credentials and verified SSH
 host-key enrollment; connection_status checks readiness only, not live access.
 Never request passwords/PSKs in chat, CSV, tool arguments or shell commands. Read

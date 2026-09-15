@@ -1,6 +1,6 @@
 {
   "name": "agent-for-secureaccess",
-  "version": "0.1.0+codex.20260915170357",
+  "version": "0.1.0+codex.20260915171928",
   "description": "Cisco Secure Access CSV planning, NETCONF validation, reviewed transactions, VTI, routes and PBR.",
   "author": {
     "name": "Local developer"

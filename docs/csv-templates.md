@@ -21,12 +21,22 @@ The tool is stateless/offline and never reads paths or opens a network session.
 Pass fresh occupied tunnel IDs from separate authorized routing_summary.
 Blank required values produce missing_fields, unknown keys/duplicate rows and
 invalid topology produce errors. Do not send secret-containing files to a tool.
+Nonblank values are validated before rendering. Errors include the CSV row,
+section, item, field, accepted format or values, and allowed numeric range. Checks
+cover IPv4/CIDR syntax, interface names, enum choices, crypto compatibility,
+lifetimes, MTU/MSS, tunnel identity, duplicate list values, and reuse controls.
 
 Before creating a template, ask the user to choose Basic or Advanced. Basic is
 recommended and omits fields with built-in Cisco defaults. Advanced includes every
 supported field. The selected mode is recorded in meta.template_mode. A Basic CSV
 expands to the same complete validated model by inserting the documented defaults;
 it does not weaken validation or authorize device changes.
+
+For multiple tunnel item groups, enter common values in the first tunnel. Blank
+source_interface, unnumbered_interface, mtu, and tcp_mss fields in later tunnel
+items inherit the first tunnel value. Unique or topology-sensitive fields such as
+interface_name, headend, local_identity, numbered address, action, and distance do
+not inherit. The preview reports every inherited field.
 For reuse inspect current vs proposed parameters before reuse_confirmed=true.
 CSV does not establish a reconciled baseline or qualified device diff.
 
