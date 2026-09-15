@@ -9,11 +9,12 @@
   "interface": {
     "displayName": "Agent for SecureAccess",
     "shortDescription": "Plan and validate IOS XE Secure Access.",
-    "longDescription": "Codex skill and local MCP tools for public CSV configuration, sanitized discovery, test-only NETCONF validation and reviewed transactions.",
+    "longDescription": "Codex skill and local MCP tools for public CSV configuration, native-vault PSKs, sanitized discovery, test-only NETCONF validation and reviewed transactions.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [
-      "Read"
+      "Read",
+      "Write"
     ],
     "defaultPrompt": [
       "Plan and validate Cisco Secure Access router configuration from a public CSV."

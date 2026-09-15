@@ -46,6 +46,8 @@ class Adapter:
     def candidate_matches(self,s,spec,payload): return self.match and s.candidate=='new'
     def candidate_changes_owned(self,s,baseline,payload): return self.owned
     def postchecks(self,s,spec,deadline): return self.healthy
+    def running_matches(self,s,spec,payload): return self.match and s.running=='new'
+    def rollback_running(self,s): s.running='base';s.call('inverse');return True
 def plan(s=None,a=None):
     s=s or Session();a=a or Adapter();store=PlanStore(clock=lambda:1)
     public=prepare(s,a,{},'host',store)
@@ -96,6 +98,21 @@ def test_qualification_precheck_and_approval_gates():
 def test_lock_failure_releases_acquired_lock():
     s,a,p=plan();s.fail='lock_candidate';r=run(s,a,p)
     assert not r['applied'] and 'unlock_running' in s.calls and 'edit' not in s.calls
+
+def test_lab_running_mode_without_candidate():
+    class LabSession(Session):
+        server_capabilities=[c for c in CAPS if ':candidate:' not in c and ':confirmed-commit:' not in c]+[
+            'urn:ietf:params:netconf:capability:rollback-on-error:1.0']
+        def edit_config(self,**kw):
+            assert kw['target']=='running' and kw['test_option']=='test-then-set' and kw['error_option']=='rollback-on-error'
+            self.running='new';self.call('edit')
+    s=LabSession();a=Adapter();store=PlanStore(clock=lambda:1)
+    public=prepare(s,a,{},'host',store)
+    assert public['transaction_mode']=='lab-running'
+    p=store.consume(public['plan_id'],public['approval_digest'])
+    r=apply(s,a,p,exclusive_window=True,postcheck_budget=15,clock=lambda:2)
+    assert r['applied'] and r['configuration_verified'] and r['operational_verified']
+    assert s.calls==['lock_running','edit','unlock_running','close']
 
 class TransactionTests(unittest.TestCase): pass
 for name,fn in list(globals().items()):

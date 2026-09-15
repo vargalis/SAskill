@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 import paramiko
-from local_secrets import native_vault
+from local_secrets import native_vault, save_tunnel_psk, delete_tunnel_psk
 
 HOST = "10.2.3.1"
 USER = "secureaccess-agent"
@@ -15,7 +15,7 @@ SERVICE = "Agent-for-SecureAccess/10.2.3.1"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["password", "host-key", "delete-password"])
+    parser.add_argument("action", choices=["password", "host-key", "delete-password", "tunnel-psk", "delete-tunnel-psk"])
     args = parser.parse_args()
     if args.action == "password":
         vault = native_vault()
@@ -28,6 +28,39 @@ def main():
         vault = native_vault()
         vault.delete_password(SERVICE, USER)
         print("Password removed.")
+    elif args.action in ("tunnel-psk", "delete-tunnel-psk"):
+        tunnel_id = int(input("Tunnel number (for example 100): ").strip())
+        headend = input("Secure Access headend IPv4 address: ").strip()
+        if args.action == "delete-tunnel-psk":
+            delete_tunnel_psk(tunnel_id, headend)
+            print("Tunnel PSK removed from the native OS secret store.")
+            return
+        mode = input("Key mode [shared/split] (shared): ").strip().lower() or "shared"
+        if mode not in ("shared", "split"):
+            raise SystemExit("Key mode must be shared or split")
+
+        def read_key(label):
+            kind = input(f"{label} format [plain/type6/hex] (plain): ").strip().lower() or "plain"
+            if kind not in ("plain", "type6", "hex"):
+                raise SystemExit("Format must be plain, type6, or hex")
+            first = getpass.getpass(f"{label} (hidden): ")
+            second = getpass.getpass(f"Repeat {label} (hidden): ")
+            if not first or first != second:
+                raise SystemExit("Keys are empty or do not match; nothing saved")
+            if "\r" in first or "\n" in first:
+                raise SystemExit("Line breaks are not supported in IOS XE PSKs")
+            if kind == "hex":
+                if len(first) % 2 or any(c not in "0123456789abcdefABCDEF" for c in first):
+                    raise SystemExit("Hex key must contain an even number of hexadecimal characters")
+                return {"format": "hex", "value": first}
+            return {"format": "key", "encryption": 6 if kind == "type6" else 0, "value": first}
+
+        if mode == "shared":
+            record = {"mode": "shared", "shared": read_key("Shared PSK")}
+        else:
+            record = {"mode": "split", "local": read_key("Local PSK"), "remote": read_key("Remote PSK")}
+        save_tunnel_psk(tunnel_id, headend, record)
+        print(f"PSK saved for Tunnel{tunnel_id} and {headend}. No secret was written to CSV or logs.")
     else:
         # Fetch a public SSH key without authenticating. Enrollment requires a trusted fingerprint.
         transport = paramiko.Transport((HOST, 830))

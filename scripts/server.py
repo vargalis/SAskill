@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from ncclient import manager
-from local_secrets import password as load_password
+from local_secrets import password as load_password, tunnel_psk as load_tunnel_psk
 from secureaccess.discovery import discover, read_native, parse_xml
 from secureaccess.provisioning import ProvisioningSpec, render_nonsecret
 from secureaccess.netconf_renderer import render_netconf
@@ -149,6 +149,24 @@ def preview_configuration_csv(csv_text: str, occupied_tunnel_ids: list[int] | No
     return import_configuration_csv(csv_text, occupied_tunnel_ids)
 
 
+@mcp.tool(annotations=READ_ONLY)
+def tunnel_psk_status(csv_text: str) -> dict:
+    """Report whether each CSV tunnel has a matching native-vault PSK. Never returns key values."""
+    parsed=import_configuration_csv(csv_text)
+    if not parsed.get('valid') or parsed.get('platform')!='iosxe':
+        return {'valid':False,'error':'Incomplete or invalid IOS XE CSV','secrets_included':False}
+    result=[]
+    for tunnel in parsed['provisioning_spec']['tunnels']:
+        try:
+            record=load_tunnel_psk(tunnel['tunnel_id'],tunnel['headend'])
+            result.append({'interface':f"Tunnel{tunnel['tunnel_id']}",'headend':tunnel['headend'],
+                           'present':record is not None,'mode':record.get('mode') if record else None})
+        except Exception:
+            result.append({'interface':f"Tunnel{tunnel['tunnel_id']}",'headend':tunnel['headend'],
+                           'present':False,'error':'Stored PSK record is unavailable or invalid'})
+    return {'valid':True,'tunnels':result,'secrets_included':False}
+
+
 
 # Plans and secret-bearing payloads remain inside this MCP process, never files.
 from secureaccess.workflow import PlanStore, prepare, apply, require_capabilities, ApplyBlocked
@@ -157,8 +175,8 @@ APPLY_PLANS = PlanStore()
 MUTATION = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True)
 
 @mcp.tool(annotations=READ_ONLY)
-def prepare_configuration_apply(csv_text: str) -> dict:
-    """Read device state and prepare a private one-use plan with public diff. No writes. Requires a qualified adapter and candidate/confirmed-commit."""
+def prepare_configuration_apply(csv_text: str, transaction_mode: str = "auto") -> dict:
+    """Prepare an exact private plan. Auto uses candidate when available, otherwise guarded lab running mode. No writes."""
     preliminary=import_configuration_csv(csv_text)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
         return {'apply_ready':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
@@ -174,8 +192,9 @@ def prepare_configuration_apply(csv_text: str) -> dict:
                 return {'apply_ready':False,'error':'CSV target differs from enrolled router'}
             spec = ProvisioningSpec.model_validate(parsed['provisioning_spec'])
             adapter = select_transaction_adapter(device,parsed)
+            adapter.secret_resolver=load_tunnel_psk
             try:
-                return prepare(device,adapter,parsed,HOST,APPLY_PLANS)
+                return prepare(device,adapter,parsed,HOST,APPLY_PLANS,transaction_mode=transaction_mode)
             finally:
                 adapter.release(device)
     except ApplyBlocked as error:
@@ -200,8 +219,8 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
         if plan.target != HOST:
             raise ApplyBlocked('Plan target differs from enrolled router')
         device = session()
-        require_capabilities(device)
         adapter = select_transaction_adapter(device,plan.spec)
+        adapter.secret_resolver=load_tunnel_psk
         execution_started = True
         return apply(device,adapter,plan,exclusive_window=exclusive_window,
                      confirm_timeout=confirm_timeout,postcheck_budget=postcheck_budget,reconnect=session)
@@ -234,6 +253,7 @@ def validate_configuration_csv(csv_text: str) -> dict:
         if parsed['target']['host']!=HOST:
             return {'validated':False,'device_written':False,'error':'CSV target differs from enrolled router'}
         adapter=select_transaction_adapter(device,parsed)
+        adapter.secret_resolver=load_tunnel_psk
         return {'validated':True,**adapter.validate_intent(device,parsed)}
     except ApplyBlocked as error:
         return {'validated':False,'device_written':False,'error':str(error)}

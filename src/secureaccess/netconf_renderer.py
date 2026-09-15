@@ -17,7 +17,22 @@ def node(parent, name, value=None, namespace=C):
     return child
 
 
-def render_netconf(spec: ProvisioningSpec) -> dict:
+def _render_psk(peer, record):
+    psk = node(peer, 'pre-shared-key')
+    def value(parent, item):
+        if item['format'] == 'hex':
+            node(parent, 'hex', item['value'])
+        else:
+            node(parent, 'encryption', item['encryption'])
+            node(parent, 'key', item['value'])
+    if record['mode'] == 'shared':
+        value(psk, record['shared'])
+    else:
+        value(node(psk, 'local-option'), record['local'])
+        value(node(psk, 'remote-option'), record['remote'])
+
+
+def render_netconf(spec: ProvisioningSpec, psk_resolver=None) -> dict:
     """Produce an offline merge preview for crypto 2022-07-20/tunnel 2022-03-01.
 
     Includes native interface IP and static routes; device qualification remains required.
@@ -74,6 +89,10 @@ def render_netconf(spec: ProvisioningSpec) -> dict:
         addr = node(node(peer, 'address'), 'ipv4')
         node(addr, 'ipv4-address', t.headend)
         node(addr, 'ipv4-mask', '255.255.255.255')
+        if psk_resolver is not None:
+            secret = psk_resolver(t.tunnel_id, str(t.headend))
+            if secret is not None:
+                _render_psk(peer, secret)
         profile = node(ikev2, 'profile')
         node(profile, 'name', ike_name)
         remote = node(node(node(profile, 'match'), 'identity'), 'remote')

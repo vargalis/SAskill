@@ -12,15 +12,17 @@ CSV is the default input; no wizard is required. FMC/FDM templates remain a late
    seven model/submodule digests from dg-wi-r1, reconciles each selected object and
    sends the complete proposed datastore as inline `validate` source (NETCONF 1.1).
    This does not call edit-config or commit and works without candidate.
-3. `prepare_configuration_apply` additionally checks management client return
+3. Store the tunnel PSK through `scripts/setup_local.py tunnel-psk`. Shared and
+   separate local/remote keys are supported as type 0, type 6, or hex.
+4. `prepare_configuration_apply` additionally checks management client return
    address, global operational RIB, ISP gateway/source interface, pre-provisioned
    peer PSKs and transaction capabilities. It returns the exact public diff and
    one-use plan/digest. The secret-bearing payload is private for 15 minutes.
-4. After explicit approval of that exact diff and an exclusive change window,
+5. After explicit approval of that exact diff and an exclusive change window,
    `apply_configuration_plan` locks running/candidate, rechecks baseline/clean
    candidate, rebuilds and inline-validates, stages only selected atoms, checks the
    complete candidate, validates candidate and sends a nonpersistent confirmed commit.
-5. Bounded postchecks verify selected VTI admin/oper state, observed input/output
+6. Bounded postchecks verify selected VTI admin/oper state, observed input/output
    counters, exact headend IKEv2 SA and inbound/outbound ESP SAs, global headend
    routing through the ISP, preserved management path and complete expected config.
    Only success triggers final commit. Failure cancels/closes and reconnects to
@@ -47,9 +49,10 @@ The shipped schema profile was read live from dg-wi-r1 via NETCONF get-schema.
 Unit tests exercise reconciliation, preservation, conflict rejection, exact schema
 selection, transaction failures, owned partial cleanup, rollback and commit uncertainty.
 Unit tests do not prove hardware application or rollback behavior.
-Live inventory confirms validate:1.1, but candidate=false and confirmed-commit=false.
-Inline validation is available at protocol level; real application stays blocked
-until the router advertises the required transaction capabilities.
+Live inventory confirms validate:1.1 and rollback-on-error, while candidate and
+confirmed-commit are absent. The guarded `lab-running` transaction is therefore
+available after an exact plan review. Candidate/confirmed-commit remains preferred
+when a router advertises it.
 
 The current task's loaded MCP process still exposes the older read-only tools.
 Its native credential is available there, while the shell test process cannot access
@@ -90,11 +93,12 @@ scope can differ. It also made unrelated device configuration prevent validation
 The transaction engine remains capability-driven. IOS XE renderers/profiles handle
 release-specific YANG differences; the test-only/diff/drift framework is shared by
 supported ISR devices. Exact profile mismatch blocks safely until a compatible
-profile is added. Candidate and confirmed-commit remain required for real apply.
+profile is added. Without candidate, lab-running requires validate, rollback-on-error,
+an exclusive window, a stable baseline, a verified result, and an owned inverse patch.
 
 validate_adapter_fixture exercises GCM/CBC using the same test-only patch path and
 can never create an apply plan. Debug output remains sanitized and contains no raw
 XML, values or secrets.
 
-Validation evidence: 71 local unit tests passed. Hardware test-only validation with
-this version has not yet run.
+Validation evidence: 80 local unit tests passed. Hardware test-only validation with
+the preceding adapter version succeeded for both GCM and CBC fixtures.

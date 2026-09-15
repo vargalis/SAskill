@@ -27,8 +27,11 @@ the preview. Never inherit interface_name, headend, local_identity, address, act
 or distance.
 Template mode is offline. Use native local setup for credentials and verified SSH
 host-key enrollment; connection_status checks readiness only, not live access.
-Never request passwords/PSKs in chat, CSV, tool arguments or shell commands. Read
-../../docs/platforms.md for native store behavior. No automatic plaintext fallback.
+Never request passwords/PSKs in chat, CSV, tool arguments or shell commands. Use
+`scripts/setup_local.py tunnel-psk` for an interactive hidden prompt. It supports a
+shared PSK or separate local/remote PSKs, each as plain type 0, IOS encrypted type 6,
+or hexadecimal input. Read ../../docs/platforms.md for native store behavior. No
+automatic plaintext fallback.
 
 ## Routing and Tunnel selection
 
@@ -67,22 +70,25 @@ round-tripping a complete get-config response. validate_adapter_fixture uses the
 same nonproduction GCM/CBC test-only path and can never enter application. Offline
 previews are review only. Acceptance is schema evidence, not live forwarding proof.
 
-prepare_configuration_apply additionally requires candidate, validate and confirmed
-commit, actual NETCONF client return address/RIB, source interface and pre-provisioned
-local/remote peer PSKs. It returns the exact public diff, expiring one-use plan ID
-and digest. New authentication requires native/manual PSK provisioning; existing
-PSKs are preserved in memory and never transferred implicitly to another headend.
+prepare_configuration_apply uses candidate/confirmed-commit when available. On an
+explicitly enrolled lab ISR without those capabilities, auto mode can prepare a
+`lab-running` plan only when validate and rollback-on-error are advertised. Both
+modes require the actual NETCONF client return address/RIB, source interface and a
+matching device or native-vault PSK. The tool returns the exact public diff, expiring
+one-use plan ID and digest. Existing PSKs are preserved in memory and never
+transferred implicitly to another headend.
 
 Only invoke apply_configuration_plan after explicit user approval of that exact
 diff/digest and an exclusive configuration window. It locks and rechecks running
-and clean candidate, revalidates, stages selected nodes, validates candidate, uses
-nonpersistent confirmed commit, and runs bounded VTI/IKEv2/IPsec/counter/underlay/
-management checks. Unknown/failure means rollback; restoration is reported only
-after verified reconnect. Partial candidate cleanup requires proof every change
-belongs to the approved plan. Uncertain final commit is never automatically retried.
+and uses either the candidate transaction or the reviewed lab-running transaction.
+Lab-running uses `test-then-set`, `rollback-on-error`, a generated inverse patch, and
+post-write nonsecret state verification. A configuration may remain present with
+`applied_operational_pending` so traffic can bring up the SA; it is never reported as
+operationally verified until VTI/IKEv2/IPsec/counter/underlay/management checks pass.
+Uncertain transactions are never automatically retried.
 Running-to-startup persistence is separate.
 
-Do not bypass gates using running edits, arbitrary XML/RPC, generic SSH or CLI.
+Do not bypass these gates with arbitrary XML/RPC, generic SSH or CLI.
 Do not expose raw running config, private XML, PSKs, exception messages or RPC logs.
 Unit tests do not prove hardware application. If the loaded MCP tools predate an
 update, state the limitation and follow the user's installation timing preference.

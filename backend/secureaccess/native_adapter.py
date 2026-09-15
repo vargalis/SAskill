@@ -54,6 +54,14 @@ def semantic(node):
 
 def digest(node): return sha256(repr(semantic(node)).encode()).hexdigest()
 
+def digest_nonsecret(node):
+    clean=deepcopy(node)
+    for item in list(clean.iter()):
+        if SECRET.search(etree.QName(item).localname):
+            parent=item.getparent()
+            if parent is not None: parent.remove(item)
+    return digest(clean)
+
 def drift_scopes(before,after,limit=32):
     """Return value-free schema scopes changed between snapshots."""
     left,right=flattened(before),flattened(after);changed=[]
@@ -115,9 +123,10 @@ def schema_text(device,name):
 
 class IOSXENativeAdapter:
     adapter_id='iosxe-native-17.9-vpn-pbr-v1'
-    def __init__(self,schemas=None):
+    def __init__(self,schemas=None,secret_resolver=None):
         path=Path(__file__).resolve().parent/'schemas'/'profile.json'
         self.schemas=schemas if schemas is not None else json.loads(path.read_text(encoding='utf-8'))
+        self.secret_resolver=secret_resolver
         self.states={};self.mutex=threading.RLock()
 
     def qualified_for(self,device,intent):
@@ -146,11 +155,12 @@ class IOSXENativeAdapter:
 
     def _reconcile(self,baseline,intent):
         spec,selections,existing_action=self._intent(intent)
-        desired=parse_xml(render_netconf(spec)['configuration_xml_preview'])
-        expected=deepcopy(baseline);payload=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap);diff=[]
+        desired=parse_xml(render_netconf(spec,self.secret_resolver)['configuration_xml_preview'])
+        expected=deepcopy(baseline);payload=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap)
+        rollback=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap);diff=[]
         # Atom paths are generated locally; never selected by caller XML/XPath.
         def atom(wanted,path,kind,force_replace=False):
-            parent=expected;p_parent=payload
+            parent=expected;p_parent=payload;r_parent=rollback
             for template in path:
                 present=find(parent,template)
                 if present is None:
@@ -164,10 +174,16 @@ class IOSXENativeAdapter:
                     for key in KEYS.get(etree.QName(template).localname,()):
                         k=template.find(f'{{{etree.QName(template).namespace}}}{key}')
                         if k is not None: out.append(deepcopy(k))
-                parent=present;p_parent=out
+                reverse=find(r_parent,template)
+                if reverse is None:
+                    reverse=etree.SubElement(r_parent,template.tag)
+                    for key in KEYS.get(etree.QName(template).localname,()):
+                        k=template.find(f'{{{etree.QName(template).namespace}}}{key}')
+                        if k is not None: reverse.append(deepcopy(k))
+                parent=present;p_parent=out;r_parent=reverse
             old=find(parent,wanted)
             replacement=deepcopy(wanted)
-            if kind=='peer' and old is not None:
+            if kind=='peer' and old is not None and replacement.find(f'{{{C}}}pre-shared-key') is None:
                 # Secrets are copied in-memory only; unrelated peers remain outside this atom.
                 for child in old:
                     if etree.QName(child).localname=='pre-shared-key': replacement.append(deepcopy(child))
@@ -215,6 +231,15 @@ class IOSXENativeAdapter:
             if old is not None: parent.remove(old)
             parent.append(deepcopy(replacement))
             edit=deepcopy(replacement);edit.set(f'{{{NC}}}operation','replace');p_parent.append(edit)
+            if old is None:
+                reverse=etree.Element(wanted.tag)
+                for key in KEYS.get(etree.QName(wanted).localname,()):
+                    k=wanted.find(f'{{{etree.QName(wanted).namespace}}}{key}')
+                    if k is not None: reverse.append(deepcopy(k))
+                reverse.set(f'{{{NC}}}operation','delete')
+            else:
+                reverse=deepcopy(old);reverse.set(f'{{{NC}}}operation','replace')
+            r_parent.append(reverse)
             # No raw baseline XML/PSK leaves in results. Interface diff exposes only reviewed fields.
             before=old
             after=replacement
@@ -275,7 +300,7 @@ class IOSXENativeAdapter:
             if access is not None:
                 for acl in access: atom(acl,[native,ip,access],'pbr_acl')
         for route_map in native.findall(f'{{{N}}}route-map'): atom(route_map,[native],'pbr_route_map')
-        return expected,payload,diff
+        return expected,payload,rollback,diff
 
     def validate_intent(self,device,intent,events=None,probe_baseline=False):
         def stage(name):
@@ -285,7 +310,7 @@ class IOSXENativeAdapter:
         stage('read_running')
         before=data(device,'running')
         stage('reconcile')
-        expected,payload,diff=self._reconcile(before,intent)
+        expected,payload,rollback,diff=self._reconcile(before,intent)
         # RFC 6241 validate:1.1: test-only performs validation without attempting
         # to set. A successful RPC is the validation result. Full running
         # snapshots are not a stable equality oracle on IOS XE.
@@ -300,19 +325,30 @@ class IOSXENativeAdapter:
 
     def build(self,device,intent):
         if isinstance(intent,dict) and intent.get('fixture_only'): raise ApplyBlocked('Schema fixtures can never be applied')
-        baseline=data(device,'running');expected,payload,diff=self._reconcile(baseline,intent)
+        baseline=data(device,'running');expected,payload,rollback,diff=self._reconcile(baseline,intent)
         device.edit_config(target='running',config=payload,default_operation='merge',
                            test_option='test-only',error_option='stop-on-error')
         if digest(data(device,'running'))!=digest(baseline):
             raise ApplyBlocked('Running changed during test-only build validation')
         with self.mutex:
             if len(self.states)>=64 and id(device) not in self.states: raise ApplyBlocked('Too many adapter snapshots')
-            self.states[id(device)]=(baseline,expected,payload)
+            self.states[id(device)]=(baseline,expected,payload,rollback)
         return etree.tostring(payload,encoding='unicode'),diff
 
     def candidate_matches(self,device,intent,payload):
         state=self.states.get(id(device))
-        return state is not None and digest(data(device,'candidate'))==digest(state[1])
+        return state is not None and digest_nonsecret(data(device,'candidate'))==digest_nonsecret(state[1])
+
+    def running_matches(self,device,intent,payload):
+        state=self.states.get(id(device))
+        return state is not None and digest_nonsecret(data(device,'running'))==digest_nonsecret(state[1])
+
+    def rollback_running(self,device):
+        state=self.states.get(id(device))
+        if state is None: return False
+        device.edit_config(target='running',config=state[3],default_operation='merge',
+                           test_option='test-then-set',error_option='rollback-on-error')
+        return digest_nonsecret(data(device,'running'))==digest_nonsecret(state[0])
 
     def candidate_changes_owned(self,device,baseline,payload):
         state=self.states.get(id(device))
@@ -362,11 +398,14 @@ class IOSXENativeAdapter:
             keyring=f'{spec.prefix}-KEYRING-{t.tunnel_id}';peer=f'{spec.prefix}-PEER-{t.tunnel_id}'
             rings=running.findall(f'{{{N}}}native/{{{N}}}crypto/{{{C}}}ikev2/{{{C}}}keyring')
             match=next((r for r in rings if r.findtext(f'{{{C}}}name')==keyring),None)
-            if match is None: raise ApplyBlocked('PSK must first be provisioned in native secret/keyring workflow; CSV never contains PSK')
-            peers=match.findall(f'{{{C}}}peer');entry=next((p for p in peers if p.findtext(f'{{{C}}}name')==peer),None)
-            if entry is None or not psk_present(entry): raise ApplyBlocked('Selected keyring peer lacks configured local/remote PSK')
-            address=entry.findtext(f'{{{C}}}address/{{{C}}}ipv4/{{{C}}}ipv4-address')
-            if address!=str(t.headend): raise ApplyBlocked('PSK peer headend differs; never transfer an existing PSK to a new peer implicitly')
+            peers=match.findall(f'{{{C}}}peer') if match is not None else []
+            entry=next((p for p in peers if p.findtext(f'{{{C}}}name')==peer),None)
+            stored=self.secret_resolver(t.tunnel_id,str(t.headend)) if self.secret_resolver is not None else None
+            if stored is None and (entry is None or not psk_present(entry)):
+                raise ApplyBlocked('No PSK is available for this tunnel in the native secret store or selected device peer')
+            if entry is not None:
+                address=entry.findtext(f'{{{C}}}address/{{{C}}}ipv4/{{{C}}}ipv4-address')
+                if address!=str(t.headend): raise ApplyBlocked('PSK peer headend differs; never transfer an existing PSK to a new peer implicitly')
         return True
 
     def postchecks(self,device,intent,deadline):
@@ -375,7 +414,7 @@ class IOSXENativeAdapter:
             interfaces=self._oper(device,IO,'interfaces');rib=parse_routes(self._oper(device,RO,'routing-state'))
             crypto=self._oper(device,CO,'crypto-oper-data')
             state=self.states.get(id(device))
-            good=state is not None and digest(data(device,'running'))==digest(state[1])
+            good=state is not None and digest_nonsecret(data(device,'running'))==digest_nonsecret(state[1])
             good=good and all(interface_up(interfaces,f'Tunnel{t.tunnel_id}') and interface_counters(interfaces,f'Tunnel{t.tunnel_id}') and
                 route_to(rib,t.headend,allow_tunnel=False,required_hop=str(spec.isp_gateway)) and
                 crypto_up(crypto,f'Tunnel{t.tunnel_id}',str(t.headend)) for t in spec.tunnels)
