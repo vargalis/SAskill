@@ -1,0 +1,7 @@
+mcp>=1.12,<2
+ncclient>=0.6.15,<0.8
+paramiko>=3.2,<5
+keyring>=25,<26
+pydantic>=2.7,<3
+PyYAML>=6,<7
+lxml>=5,<7
