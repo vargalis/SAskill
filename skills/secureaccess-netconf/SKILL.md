@@ -11,7 +11,12 @@ future FMC/FDM phase and must never generate IOS XE configuration or router I/O.
 
 ## Input and readiness
 
-Create a public template with create_configuration_csv. Read the locally filled
+At the start of every CSV workflow, ask the user to choose **Basic** or **Advanced**.
+Recommend Basic. Basic shows only deployment-specific decisions and applies the
+built-in Cisco recommendations for omitted fields. Advanced exposes every supported
+field and its recommendation. Do not create the CSV until the user selects a mode.
+
+Create a public template with create_configuration_csv and pass the selected mode. Read the locally filled
 CSV and send its text to preview_configuration_csv. Return missing fields and
 errors; do not invent headends, identities, crypto choices or interface selections.
 Template mode is offline. Use native local setup for credentials and verified SSH

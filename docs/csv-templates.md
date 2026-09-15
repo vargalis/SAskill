@@ -21,6 +21,12 @@ The tool is stateless/offline and never reads paths or opens a network session.
 Pass fresh occupied tunnel IDs from separate authorized routing_summary.
 Blank required values produce missing_fields, unknown keys/duplicate rows and
 invalid topology produce errors. Do not send secret-containing files to a tool.
+
+Before creating a template, ask the user to choose Basic or Advanced. Basic is
+recommended and omits fields with built-in Cisco defaults. Advanced includes every
+supported field. The selected mode is recorded in meta.template_mode. A Basic CSV
+expands to the same complete validated model by inserting the documented defaults;
+it does not weaken validation or authorize device changes.
 For reuse inspect current vs proposed parameters before reuse_confirmed=true.
 CSV does not establish a reconciled baseline or qualified device diff.
 

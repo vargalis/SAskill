@@ -135,12 +135,12 @@ def configuration_summary() -> dict:
 
 
 @mcp.tool(annotations=READ_ONLY)
-def create_configuration_csv(platform: str = "iosxe", name: str = "", host: str = "") -> dict:
-    """Create a public CSV template to fill locally. FTD is future planning only. No device I/O."""
+def create_configuration_csv(mode: str, platform: str = "iosxe", name: str = "", host: str = "") -> dict:
+    """Create a basic or advanced public CSV template. Ask the user to choose the mode first. No device I/O."""
     try:
-        return configuration_csv_template(platform, name, host)
+        return configuration_csv_template(platform, name, host, mode)
     except ValueError:
-        return {"error": "Unsupported template platform", "apply_available": False}
+        return {"error": "Unsupported template platform or mode", "apply_available": False}
 
 
 @mcp.tool(annotations=READ_ONLY)

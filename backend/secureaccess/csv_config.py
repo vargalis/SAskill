@@ -12,6 +12,7 @@ SCALARS = {
     'meta': {
         'schema_version': ('2', True, 'Keep 2. This identifies the CSV schema and must not be edited.'),
         'platform': ('iosxe', True, 'Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.'),
+        'template_mode': ('advanced', False, 'Template presentation mode: basic or advanced. Basic omits parameters that have built-in recommended defaults.'),
     },
     'device': {
         'name': ('', True, 'Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.'),
@@ -22,7 +23,7 @@ SCALARS = {
         'routing_mode': ('', True, 'Enter static or pbr. Recommendation: use pbr when selected source LANs must reach 0.0.0.0/0 through Secure Access.'),
         'isp_gateway': ('', True, 'Enter the current ISP next-hop IPv4 address. Recommendation: copy it from the verified active default route.'),
         'router_wan_ip': ('', True, 'Enter the router WAN IPv4 address used by the IKEv2 policy local-address match. It can be private when the ISR is behind NAT.'),
-        'prefix': ('', True, 'Enter a short IOS XE object-name prefix, for example sse. Recommendation: use letters, digits, hyphens, or underscores and keep it unique.'),
+        'prefix': ('sse', True, 'IOS XE object-name prefix. Recommended value: sse; use another short unique prefix only when required.'),
     },
     'crypto': {
         'ike_encryption': ('aes-gcm-256', True, 'IKEv2 encryption. Cisco recommends GCM for maximum throughput; recommended value: aes-gcm-256.'),
@@ -68,9 +69,27 @@ FTD = {
     'template_name': ('', True, 'Enter the approved manager template name. Recommendation: include site, purpose, and version in the name.'),
 }
 
-def configuration_csv_template(platform='iosxe', name='', host=''):
+BASIC_HIDDEN = {
+    ('network', 'existing_objects_action'), ('network', 'prefix'),
+    *(('crypto', field) for field in SCALARS['crypto']),
+    ('pbr', 'failure_behavior'),
+    ('tunnel', 'source_loopback_address'), ('tunnel', 'mtu'),
+    ('tunnel', 'tcp_mss'), ('tunnel', 'distance'),
+}
+BASIC_DEFAULTS = {
+    **{('crypto', field): value for field, (value, _, _) in SCALARS['crypto'].items()},
+    ('network', 'prefix'): 'sse',
+    ('pbr', 'failure_behavior'): 'normal-routing',
+    ('tunnel', 'mtu'): '1390',
+    ('tunnel', 'tcp_mss'): '1350',
+    ('tunnel', 'distance'): '1',
+}
+
+def configuration_csv_template(platform='iosxe', name='', host='', mode='advanced'):
     if platform not in ('iosxe', 'ftd'):
         raise ValueError('Unsupported platform')
+    if mode not in ('basic', 'advanced'):
+        raise ValueError('Unsupported template mode')
     rows=[]
     def group(section, fields, item='1'):
         for field, (value, required, description) in fields.items():
@@ -81,6 +100,7 @@ def configuration_csv_template(platform='iosxe', name='', host=''):
         group(section, fields)
     for row in rows:
         if row[0]=='meta' and row[2]=='platform': row[3]=platform
+        if row[0]=='meta' and row[2]=='template_mode': row[3]=mode
         if row[0]=='device': row[3]={'name':name,'host':host}[row[2]]
     if platform=='iosxe':
         for section, description in LISTS.items(): group(section,{'value':('',True,description)})
@@ -88,6 +108,8 @@ def configuration_csv_template(platform='iosxe', name='', host=''):
         group('tunnel',TUNNEL)
     else:
         group('ftd',FTD)
+    if mode == 'basic' and platform == 'iosxe':
+        rows = [row for row in rows if (row[0], row[2]) not in BASIC_HIDDEN]
     for row in rows:
         if row[4]=='yes' and not row[3]:
             row[3]=REQUIRED_PLACEHOLDER
@@ -95,7 +117,7 @@ def configuration_csv_template(platform='iosxe', name='', host=''):
     writer=csv.writer(stream,delimiter=';',lineterminator='\r\n')
     writer.writerow(COLUMNS);writer.writerows(rows)
     return {'csv_text':stream.getvalue(),'encoding':'utf-8-sig','delimiter':';','schema_version':'2',
-            'platform':platform,'apply_available':False,
+            'platform':platform,'template_mode':mode,'apply_available':False,
             'note':'FTD template is planning-only; no FTD API/configuration adapter implemented' if platform=='ftd' else 'Fill values only; copy list/tunnel rows with distinct item numbers. No passwords or PSKs.'}
 
 def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
@@ -122,12 +144,22 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         platform=value('meta','platform')
         if platform not in ('iosxe','ftd') or value('meta','schema_version')!='2':
             raise ValueError('Unsupported platform/schema version')
+        template_mode=value('meta','template_mode') or 'advanced'
+        if template_mode not in ('basic','advanced'):
+            raise ValueError('Unsupported template mode')
         allowed={s:set(fields) for s,fields in SCALARS.items() if platform=='iosxe' or s in ('meta','device')}
         allowed.update({'ftd':set(FTD)} if platform=='ftd' else {**{s:{'value'} for s in LISTS},'pbr':set(PBR),'tunnel':set(TUNNEL)})
         for index,((s,i,f),v) in enumerate(cells.items(),2):
             if s not in allowed or f not in allowed[s] or (s not in LISTS and s!='tunnel' and i!='1'):
                 errors.append(f'Row {index}: unknown field or section/item')
         if errors: return {**base,'valid':False,'errors':errors}
+        if template_mode == 'basic' and platform == 'iosxe':
+            for (section, field), default in BASIC_DEFAULTS.items():
+                if section == 'tunnel':
+                    for item in {i for s,i,f in cells if s=='tunnel'}:
+                        cells.setdefault((section,item,field),default)
+                else:
+                    cells.setdefault((section,'1',field),default)
         missing=[]
         def required(s,fields,item='1'):
             for f,(_,needed,_) in fields.items():
@@ -185,7 +217,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         from .wizard import Target
         target=Target.model_validate({'name':value('device','name'),'host':value('device','host')})
         xml=render_netconf(spec)
-        return {**base,'valid':True,'platform':'iosxe','target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
+        return {**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
                 'tunnel_interface_intent':intent,'existing_objects_action':existing_action,'result':render_nonsecret(spec),'netconf_preview':xml,
                 'blockers':list(dict.fromkeys(blockers+['CSV approval is not device apply authorization']+xml['blockers']))}
     except ValidationError as error:

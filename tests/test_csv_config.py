@@ -9,8 +9,8 @@ from secureaccess.provisioning import CryptoParameters
 
 def encode(rows):
     stream=io.StringIO(newline='');w=csv.DictWriter(stream,COLUMNS,delimiter=';');w.writeheader();w.writerows(rows);return stream.getvalue()
-def filled():
-    rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='10.2.3.1')['csv_text']),delimiter=';'))
+def filled(mode='advanced'):
+    rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='10.2.3.1',mode=mode)['csv_text']),delimiter=';'))
     supplied={'network':{'routing_mode':'pbr','isp_gateway':'192.168.2.1','router_wan_ip':'192.168.2.110','prefix':'SSE'},
               'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
               'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
@@ -43,6 +43,18 @@ class Checks(unittest.TestCase):
         self.assertIn('match address local 192.168.2.110',r['result']['configuration_cli_preview'])
         self.assertNotIn('ip route 0.0.0.0',r['result']['configuration_cli_preview'])
         self.assertFalse(r['apply_ready'])
+    def test_basic_omits_recommended_fields_and_expands_defaults(self):
+        rows=filled('basic')
+        fields={(row['section'],row['field']) for row in rows}
+        self.assertNotIn(('crypto','ike_encryption'),fields)
+        self.assertNotIn(('tunnel','mtu'),fields)
+        self.assertIn(('tunnel','headend'),fields)
+        r=import_configuration_csv(encode(rows),[1])
+        self.assertTrue(r['valid'],r)
+        self.assertEqual(r['template_mode'],'basic')
+        self.assertEqual(r['provisioning_spec']['crypto']['ike_encryption'],'aes-gcm-256')
+        self.assertEqual(r['provisioning_spec']['tunnels'][0]['mtu'],1390)
+        self.assertEqual(r['provisioning_spec']['pbr']['failure_behavior'],'normal-routing')
     def test_reject_unknown_secret_duplicate_formula(self):
         for change in ('secret','duplicate','formula'):
             rows=filled()

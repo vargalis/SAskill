@@ -6,7 +6,7 @@ static routing and source-based PBR. FTD FMC/FDM template application is a later
 
 ## Tools
 
-- create_configuration_csv / preview_configuration_csv: offline template/import.
+- create_configuration_csv / preview_configuration_csv: offline Basic or Advanced template/import. The skill asks for the mode before creating a CSV; Basic is recommended and hides fields with built-in Cisco defaults.
 - inventory_capabilities / routing_summary: enrolled router read-only discovery.
 - validate_configuration_csv: reconciled patch, NETCONF edit-config test-only.
 - validate_adapter_fixture: controlled GCM/CBC schema probes; no application path.
