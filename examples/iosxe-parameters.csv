@@ -1,39 +1,39 @@
-﻿section;item;field;value;required;description
-meta;1;schema_version;2;yes;"Версия формата; не менять"
-meta;1;platform;iosxe;yes;iosxe или ftd
-device;1;name;;yes;Имя устройства
-device;1;host;;yes;IP управления
-network;1;existing_objects_action;;no;"reject по умолчанию; replace_named разрешает замену только перечисленных именованных объектов после diff"
-network;1;routing_mode;;yes;static или pbr
-network;1;isp_gateway;;yes;Шлюз ISP
-network;1;router_wan_ip;;yes;IPv4-адрес WAN-интерфейса для match address local в IKEv2 policy
-network;1;prefix;;yes;Префикс имён объектов
-crypto;1;ike_encryption;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;prf;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;integrity;;no;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;dh_groups;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;esp;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;pfs;;no;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;ike_lifetime;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;ipsec_lifetime;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;dpd_interval;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-crypto;1;dpd_retries;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
-management_prefix;1;value;;yes;"Сеть управления; CIDR"
-destination_prefix;1;value;;yes;"Сеть НАЗНАЧЕНИЯ Secure Access; CIDR"
-source_prefix;1;value;;yes;"Сеть ИСТОЧНИКА PBR; CIDR"
-bypass_prefix;1;value;;yes;"Исключение PBR по НАЗНАЧЕНИЮ; CIDR"
-ingress_interface;1;value;;yes;"Входной интерфейс PBR; не выводится из обратного маршрута"
-pbr;1;failure_behavior;;yes;"normal-routing; подтвердите возврат к RIB/ISP при отказе VTI"
-tunnel;1;interface_name;;yes;Выберите TunnelN
-tunnel;1;action;;yes;create или reuse
-tunnel;1;headend;;yes;IPv4 headend
-tunnel;1;local_identity;;yes;"Local IKE identity; без PSK"
-tunnel;1;source_interface;;yes;WAN/source interface
-tunnel;1;address;;no;"IPv4 VTI с маской; либо unnumbered_interface"
-tunnel;1;unnumbered_interface;;no;Вместо address
-tunnel;1;source_loopback_address;;no;Только при создании source Loopback
-tunnel;1;mtu;;yes;Подтвердите MTU
-tunnel;1;tcp_mss;;yes;Подтвердите MSS
-tunnel;1;distance;;yes;Administrative distance
-tunnel;1;reuse_confirmed;;no;Для reuse: true после просмотра текущих и желаемых параметров
-tunnel;1;change_scope;;no;Для reuse: точные границы изменения
+﻿section;item;field;value;required;description
+meta;1;schema_version;2;yes;Keep 2. This identifies the CSV schema and must not be edited.
+meta;1;platform;iosxe;yes;Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.
+device;1;name;<<< REQUIRED >>>;yes;Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.
+device;1;host;<<< REQUIRED >>>;yes;Enter the NETCONF management IPv4 address, for example 10.2.3.1. Do not enter the WAN address.
+network;1;existing_objects_action;;no;Leave blank to reject name conflicts. Use replace_named only after reviewing an exact diff of the named objects.
+network;1;routing_mode;<<< REQUIRED >>>;yes;Enter static or pbr. Recommendation: use pbr when selected source LANs must reach 0.0.0.0/0 through Secure Access.
+network;1;isp_gateway;<<< REQUIRED >>>;yes;Enter the current ISP next-hop IPv4 address. Recommendation: copy it from the verified active default route.
+network;1;router_wan_ip;<<< REQUIRED >>>;yes;Enter the router WAN IPv4 address used by the IKEv2 policy local-address match. It can be private when the ISR is behind NAT.
+network;1;prefix;<<< REQUIRED >>>;yes;Enter a short IOS XE object-name prefix, for example sse. Recommendation: use letters, digits, hyphens, or underscores and keep it unique.
+crypto;1;ike_encryption;aes-gcm-256;yes;"IKEv2 encryption. Cisco recommends GCM for maximum throughput; recommended value: aes-gcm-256."
+crypto;1;prf;sha256;yes;IKEv2 pseudo-random function. SHA256 is required with the recommended AES-GCM proposal.
+crypto;1;integrity;;no;"IKEv2 integrity algorithm. Leave blank with AES-GCM because GCM provides authenticated encryption; use the portal-approved hash with CBC."
+crypto;1;dh_groups;19|20;yes;"IKEv2 Diffie-Hellman groups separated by |. Recommended ISR proposal: 19|20; Secure Access also supports 14 and 15."
+crypto;1;esp;esp-gcm-256;yes;"IPsec ESP transform. Cisco recommends GCM for throughput; recommended value: esp-gcm-256."
+crypto;1;pfs;;no;"Optional IPsec PFS group. Recommendation: leave blank unless required and tested; Cisco warns PFS preference can cause rekey failures."
+crypto;1;ike_lifetime;14400;yes;IKE rekey interval in seconds. Recommended Secure Access default: 14400 seconds (4 hours).
+crypto;1;ipsec_lifetime;3600;yes;Child SA/IPsec rekey interval in seconds. Recommended Secure Access default: 3600 seconds (1 hour).
+crypto;1;dpd_interval;10;yes;"DPD interval in seconds. The Cisco ISR example uses 10 seconds; use 30 seconds when intentionally matching the Secure Access 156-second maximum timeout design."
+crypto;1;dpd_retries;3;yes;"DPD retry value used by the ISR profile. Recommended ISR guide value: 3; verify the resulting failover timing in production testing."
+management_prefix;1;value;<<< REQUIRED >>>;yes;Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.
+destination_prefix;1;value;<<< REQUIRED >>>;yes;Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.
+source_prefix;1;value;<<< REQUIRED >>>;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+bypass_prefix;1;value;<<< REQUIRED >>>;yes;Enter one destination that must use normal routing, in CIDR notation. Include management/local destinations and the Secure Access headend as /32 to prevent recursion.
+ingress_interface;1;value;<<< REQUIRED >>>;yes;Enter the IOS XE LAN interface where matching traffic arrives, for example GigabitEthernet0/0/1. Cisco requires the route-map on the ingress interface.
+pbr;1;failure_behavior;<<< REQUIRED >>>;yes;"Enter normal-routing. This returns traffic to the normal RIB/ISP when no PBR set action is usable; verify this behavior during failover testing."
+tunnel;1;interface_name;<<< REQUIRED >>>;yes;Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.
+tunnel;1;action;<<< REQUIRED >>>;yes;Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.
+tunnel;1;headend;<<< REQUIRED >>>;yes;Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.
+tunnel;1;local_identity;<<< REQUIRED >>>;yes;Enter the Tunnel ID/email from the Secure Access portal. Never place the tunnel passphrase or PSK in this CSV.
+tunnel;1;source_interface;<<< REQUIRED >>>;yes;Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.
+tunnel;1;address;;no;Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.
+tunnel;1;unnumbered_interface;;no;"Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address."
+tunnel;1;source_loopback_address;;no;"Enter a CIDR address only when the plan must create a new loopback used as the tunnel source; otherwise leave blank."
+tunnel;1;mtu;1390;yes;"Tunnel inner IP MTU in bytes. Cisco Secure Access requires no more than 1390; recommended value: 1390. Do not reduce physical-interface MTU."
+tunnel;1;tcp_mss;1350;yes;TCP MSS clamp in bytes. Recommended value: 1350 to match Cisco Secure Access and avoid fragmentation.
+tunnel;1;distance;1;yes;"Static-route administrative distance from 1 to 254. Recommended primary value: 1; use a larger value only for an intentionally floating backup."
+tunnel;1;reuse_confirmed;;no;For action=reuse, enter true only after reviewing the current interface and the exact proposed changes.
+tunnel;1;change_scope;;no;"For action=reuse, describe the exact approved fields that may change; leave blank for action=create."

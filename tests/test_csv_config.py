@@ -22,8 +22,18 @@ def filled():
 
 class Checks(unittest.TestCase):
     def test_template_incomplete(self):
-        r=import_configuration_csv(configuration_csv_template()['csv_text'])
+        text=configuration_csv_template()['csv_text']
+        self.assertIn('<<< REQUIRED >>>',text)
+        rows=list(csv.DictReader(io.StringIO(text),delimiter=';'))
+        self.assertTrue(all(row['description'] for row in rows))
+        values={(row['section'],row['field']):row['value'] for row in rows}
+        self.assertEqual(values[('crypto','ike_lifetime')],'14400')
+        self.assertEqual(values[('crypto','ipsec_lifetime')],'3600')
+        self.assertEqual(values[('tunnel','mtu')],'1390')
+        self.assertEqual(values[('tunnel','tcp_mss')],'1350')
+        r=import_configuration_csv(text)
         self.assertFalse(r['valid']);self.assertTrue(r['missing_fields']);self.assertFalse(r['apply_ready'])
+        self.assertIn('management_prefix.1.value',r['missing_fields'])
     def test_complete_and_no_device_write(self):
         r=import_configuration_csv('\ufeff'+encode(filled()),[1])
         self.assertTrue(r['valid'],r)
