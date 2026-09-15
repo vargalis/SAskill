@@ -1,0 +1,10 @@
+﻿section;item;field;value;required;description
+meta;1;schema_version;1;yes;"Версия формата; не менять"
+meta;1;platform;ftd;yes;iosxe или ftd
+device;1;name;;yes;Имя устройства
+device;1;host;;yes;IP управления
+ftd;1;manager_type;;yes;"FMC или FDM; будущий адаптер"
+ftd;1;manager_host;;yes;Адрес менеджера
+ftd;1;device_id;;yes;Идентификатор устройства
+ftd;1;version;;yes;Версия FTD
+ftd;1;template_name;;yes;Имя будущего квалифицированного шаблона

@@ -1,0 +1,39 @@
+﻿section;item;field;value;required;description
+meta;1;schema_version;2;yes;"Версия формата; не менять"
+meta;1;platform;iosxe;yes;iosxe или ftd
+device;1;name;;yes;Имя устройства
+device;1;host;;yes;IP управления
+network;1;existing_objects_action;;no;"reject по умолчанию; replace_named разрешает замену только перечисленных именованных объектов после diff"
+network;1;routing_mode;;yes;static или pbr
+network;1;isp_gateway;;yes;Шлюз ISP
+network;1;router_wan_ip;;yes;IPv4-адрес WAN-интерфейса для match address local в IKEv2 policy
+network;1;prefix;;yes;Префикс имён объектов
+crypto;1;ike_encryption;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;prf;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;integrity;;no;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;dh_groups;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;esp;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;pfs;;no;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;ike_lifetime;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;ipsec_lifetime;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;dpd_interval;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+crypto;1;dpd_retries;;yes;"Параметр из согласованной настройки Secure Access; группы DH через |"
+management_prefix;1;value;;yes;"Сеть управления; CIDR"
+destination_prefix;1;value;;yes;"Сеть НАЗНАЧЕНИЯ Secure Access; CIDR"
+source_prefix;1;value;;yes;"Сеть ИСТОЧНИКА PBR; CIDR"
+bypass_prefix;1;value;;yes;"Исключение PBR по НАЗНАЧЕНИЮ; CIDR"
+ingress_interface;1;value;;yes;"Входной интерфейс PBR; не выводится из обратного маршрута"
+pbr;1;failure_behavior;;yes;"normal-routing; подтвердите возврат к RIB/ISP при отказе VTI"
+tunnel;1;interface_name;;yes;Выберите TunnelN
+tunnel;1;action;;yes;create или reuse
+tunnel;1;headend;;yes;IPv4 headend
+tunnel;1;local_identity;;yes;"Local IKE identity; без PSK"
+tunnel;1;source_interface;;yes;WAN/source interface
+tunnel;1;address;;no;"IPv4 VTI с маской; либо unnumbered_interface"
+tunnel;1;unnumbered_interface;;no;Вместо address
+tunnel;1;source_loopback_address;;no;Только при создании source Loopback
+tunnel;1;mtu;;yes;Подтвердите MTU
+tunnel;1;tcp_mss;;yes;Подтвердите MSS
+tunnel;1;distance;;yes;Administrative distance
+tunnel;1;reuse_confirmed;;no;Для reuse: true после просмотра текущих и желаемых параметров
+tunnel;1;change_scope;;no;Для reuse: точные границы изменения
