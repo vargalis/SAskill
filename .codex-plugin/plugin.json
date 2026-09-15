@@ -1,0 +1,23 @@
+{
+  "name": "agent-for-secureaccess",
+  "version": "0.1.0+codex.20260915064608",
+  "description": "Cisco Secure Access CSV planning, NETCONF validation, reviewed transactions, VTI, routes and PBR.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent for SecureAccess",
+    "shortDescription": "Plan and validate IOS XE Secure Access.",
+    "longDescription": "Codex skill and local MCP tools for public CSV configuration, sanitized discovery, test-only NETCONF validation and reviewed transactions.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Plan and validate Cisco Secure Access router configuration from a public CSV."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
