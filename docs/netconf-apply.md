@@ -82,9 +82,13 @@ The IOS XE adapter reads running for reconciliation and a public diff, then subm
 only the generated patch to running using edit-config with test-option=test-only,
 default-operation=merge and error-option=stop-on-error. RFC 6241 validate:1.1 defines
 test-only as validation without attempting to set. A successful RPC is the validation
-result. Full running digests are not compared after test-only because IOS XE retrieval
-serialization is not a reliable equality oracle; prepare/apply perform their own
-locked baseline and candidate checks.
+result. Running digests are compared after test-only. The fingerprint excludes only
+the confirmed IOS XE retrieval artifact where an existing OpenConfig
+switched-vlan/config/native-vlan leaf becomes visible after test-only; native IOS XE
+and every Secure Access-managed scope remain strict. The semantic comparison also
+accepts duplicated IOS XE legacy aliases only when they exactly equal the canonical
+local-ip, tunnel-choice, profile-option/name, or interface-list value. Prepare/apply
+also perform their own locked baseline and candidate checks.
 
 The code no longer validates a reconstructed full get-config response. That approach
 was rejected because server output is not guaranteed to be a portable configuration
@@ -101,5 +105,5 @@ validate_adapter_fixture exercises GCM/CBC using the same test-only patch path a
 can never create an apply plan. Debug output remains sanitized and contains no raw
 XML, values or secrets.
 
-Validation evidence: 80 local unit tests passed. Hardware test-only validation with
+Validation evidence: 84 local unit tests passed. Hardware test-only validation with
 the preceding adapter version succeeded for both GCM and CBC fixtures.

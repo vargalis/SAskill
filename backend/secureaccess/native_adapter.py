@@ -29,6 +29,7 @@ KEYS={'proposal':('name',),'policy':('name',),'keyring':('name',),'peer':('name'
       'fwd-list':('fwd',),'route-map-without-order-seq':('seq_no',),
       'access-list-seq-rule':('sequence',)}
 SECRET=re.compile(r'password|secret|pre-shared|private-key|community|^key$|^hex$',re.I)
+OPENCONFIG_VLAN='http://openconfig.net/yang/vlan'
 
 def identity(node):
     ns=etree.QName(node).namespace
@@ -41,11 +42,39 @@ def find(parent,wanted):
     if len(nodes)>1: raise ApplyBlocked('Ambiguous native list encoding; unsupported configuration')
     return nodes[0] if nodes else None
 
+def unstable_test_only_leaf(node):
+    """Ignore the IOS XE get-config visibility artifact after test-only."""
+    if node.tag != f'{{{OPENCONFIG_VLAN}}}native-vlan': return False
+    ancestors=[];parent=node.getparent()
+    while parent is not None and len(ancestors)<5:
+        ancestors.append(etree.QName(parent).localname);parent=parent.getparent()
+    return ancestors[:4]==['config','switched-vlan','ethernet','interface']
+
+def materialized_alias(node):
+    """Recognize IOS XE leaves materialized beside an equivalent canonical leaf."""
+    parent=node.getparent()
+    if parent is None: return False
+    text=(node.text or '').strip()
+    if node.tag==f'{{{C}}}local' and parent.tag==f'{{{C}}}address':
+        return text==(parent.findtext(f'{{{C}}}local-ip') or '').strip()
+    if node.tag==f'{{{C}}}tunnel' and parent.tag==f'{{{C}}}mode':
+        return parent.find(f'{{{C}}}tunnel-choice') is not None and len(node)==0 and not text
+    if node.tag==f'{{{C}}}profile' and parent.tag==f'{{{C}}}ipsec':
+        canonical=parent.findtext(f'{{{C}}}profile-option/{{{C}}}name')
+        return canonical is not None and text==canonical.strip()
+    if node.tag==f'{{{R}}}interface' and parent.tag==f'{{{R}}}set':
+        tunnel=node.findtext(f'{{{R}}}Tunnel')
+        canonical=parent.findtext(f'{{{R}}}interface-list')
+        return tunnel is not None and canonical==f'Tunnel{tunnel.strip()}'
+    return False
+
 def semantic(node):
     # Prefix-independent fingerprint; preserve repeated-node order for user lists.
     groups={}
     for child in node:
         if child.tag==f'{{{N}}}metric' and (child.text or '').strip()=='1': continue
+        if unstable_test_only_leaf(child): continue
+        if materialized_alias(child): continue
         if isinstance(child.tag,str): groups.setdefault(child.tag,[]).append(semantic(child))
     for tag,values in groups.items():
         if etree.QName(tag).localname in KEYS:

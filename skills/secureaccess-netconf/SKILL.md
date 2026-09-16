@@ -70,6 +70,12 @@ and require an unchanged digest. This works without candidate. Never validate by
 round-tripping a complete get-config response. validate_adapter_fixture uses the
 same nonproduction GCM/CBC test-only path and can never enter application. Offline
 previews are review only. Acceptance is schema evidence, not live forwarding proof.
+The digest excludes only the confirmed IOS XE retrieval artifact where test-only
+causes an existing OpenConfig switched-vlan/config/native-vlan leaf to appear.
+It also treats IOS XE's duplicated legacy aliases as equivalent only when their
+values exactly match the canonical local-ip, tunnel-choice, profile-option/name,
+or interface-list leaf. Native IOS XE and every Secure Access-managed value remains
+strict.
 
 prepare_configuration_apply uses candidate/confirmed-commit when available. On an
 explicitly enrolled lab ISR without those capabilities, auto mode can prepare a

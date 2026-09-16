@@ -4,7 +4,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 from copy import deepcopy
 from types import SimpleNamespace
 from hashlib import sha256
-from secureaccess.native_adapter import IOSXENativeAdapter,digest,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,NC
+from secureaccess.native_adapter import IOSXENativeAdapter,digest,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,R,NC
 from secureaccess.discovery import parse_xml
 from secureaccess.workflow import ApplyBlocked
 from test_csv_config import filled,encode
@@ -153,6 +153,20 @@ class NativeTests(unittest.TestCase):
         a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd><metric>1</metric></fwd-list>')
         b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd></fwd-list>')
         self.assertEqual(digest(a),digest(b))
+    def test_openconfig_native_vlan_visibility_artifact_is_normalized(self):
+        vlan='http://openconfig.net/yang/vlan'
+        absent=parse_xml(f'<data xmlns="{NC}"><interfaces><interface><ethernet><switched-vlan><config/></switched-vlan></ethernet></interface></interfaces></data>')
+        visible=parse_xml(f'<data xmlns="{NC}"><interfaces><interface><ethernet><switched-vlan><config><native-vlan xmlns="{vlan}">101</native-vlan></config></switched-vlan></ethernet></interface></interfaces></data>')
+        self.assertEqual(digest(absent),digest(visible))
+        unrelated_a=parse_xml(f'<data xmlns="{NC}"><native-vlan xmlns="{vlan}">101</native-vlan></data>')
+        unrelated_b=parse_xml(f'<data xmlns="{NC}"/>')
+        self.assertNotEqual(digest(unrelated_a),digest(unrelated_b))
+    def test_iosxe_materialized_equivalent_aliases_are_normalized(self):
+        canonical=parse_xml(f'''<data xmlns="{NC}"><address xmlns="{C}"><local-ip>192.0.2.1</local-ip></address><mode xmlns="{C}"><tunnel-choice/></mode><ipsec xmlns="{C}"><profile-option><name>P</name></profile-option></ipsec><set xmlns="{R}"><interface-list>Tunnel100</interface-list></set></data>''')
+        materialized=parse_xml(f'''<data xmlns="{NC}"><address xmlns="{C}"><local-ip>192.0.2.1</local-ip><local>192.0.2.1</local></address><mode xmlns="{C}"><tunnel-choice/><tunnel/></mode><ipsec xmlns="{C}"><profile-option><name>P</name></profile-option><profile>P</profile></ipsec><set xmlns="{R}"><interface-list>Tunnel100</interface-list><interface><Tunnel>100</Tunnel></interface></set></data>''')
+        self.assertEqual(digest(canonical),digest(materialized))
+        materialized.find(f'{{{C}}}address/{{{C}}}local').text='192.0.2.2'
+        self.assertNotEqual(digest(canonical),digest(materialized))
     def test_prechecks_actual_client_and_missing_psk(self):
         from types import SimpleNamespace
         self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.10.10.9',4444))))

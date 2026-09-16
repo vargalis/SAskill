@@ -97,20 +97,26 @@ def apply_running(session, adapter: TransactionAdapter, plan: PreparedPlan, *, e
     if not 15<=postcheck_budget<=300: raise ApplyBlocked('Invalid postcheck budget')
     require_running_capabilities(session)
     if not adapter.qualified_for(session,plan.spec): raise ApplyBlocked('Adapter qualification changed')
-    locked=False;edit_attempted=False;configuration_verified=False;rollback='not_required';error=None
+    locked=False;edit_attempted=False;configuration_verified=False;rollback='not_required';error=None;stage='lock'
     try:
         session.lock(target='running');locked=True
+        stage='baseline'
         if not compare_digest(adapter.fingerprint(session,'running'),plan.baseline):
             raise ApplyBlocked('Running changed since review; prepare again')
+        stage='prechecks'
         if adapter.prechecks(session,plan.spec) is not True: raise ApplyBlocked('Prechecks failed or unknown under lock')
+        stage='reconcile'
         payload,diff=adapter.build(session,plan.spec)
         if payload!=plan.payload or tuple(diff)!=plan.diff: raise ApplyBlocked('Reconciled payload changed; prepare again')
+        stage='edit'
         edit_attempted=True
         session.edit_config(target='running',config=plan.payload,default_operation='merge',
                             test_option='test-then-set',error_option='rollback-on-error')
+        stage='configuration_verification'
         if adapter.running_matches(session,plan.spec,plan.payload) is not True:
             raise ApplyBlocked('Running does not match the approved nonsecret desired state')
         configuration_verified=True
+        stage='operational_postchecks'
         deadline=clock()+postcheck_budget
         if hasattr(session,'timeout'): session.timeout=min(5,max(2,postcheck_budget/8))
         operational=adapter.postchecks(session,plan.spec,deadline) is True and clock()<=deadline
@@ -120,7 +126,7 @@ def apply_running(session, adapter: TransactionAdapter, plan: PreparedPlan, *, e
                 'plan_id':plan.plan_id,'transaction_mode':'lab-running','startup_persisted':False,
                 'secrets_included':False}
     except Exception:
-        error='NETCONF running-datastore transaction failed or was uncertain'
+        error='NETCONF running-datastore transaction failed or was uncertain at '+stage
         if edit_attempted and not configuration_verified:
             try:
                 rollback='owned_inverse_verified' if adapter.rollback_running(session) else 'owned_inverse_unverified'
