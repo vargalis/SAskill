@@ -47,7 +47,7 @@ LISTS = {
     'management_prefix': 'Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.',
     'destination_prefix': 'Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.',
     'source_prefix': 'Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access.',
-    'bypass_prefix': 'Enter one destination that must use normal routing, in CIDR notation. Include management/local destinations and the Secure Access headend as /32 to prevent recursion.',
+    'bypass_prefix': 'Optional. Enter a destination that must use normal routing. Leave every bypass row blank to generate only source-to-destination permit entries.',
     'ingress_interface': 'Enter the IOS XE LAN interface where matching traffic arrives, for example GigabitEthernet0/0/1. Cisco requires the route-map on the ingress interface.',
 }
 TUNNEL = {
@@ -254,7 +254,7 @@ def configuration_csv_template(platform='iosxe', name='', host='', mode='advance
         if row[0]=='device': row[3]={'name':name,'host':host}[row[2]]
     if platform=='iosxe':
         group('connection',CONNECTION)
-        for section, description in LISTS.items(): group(section,{'value':('',True,description)})
+        for section, description in LISTS.items(): group(section,{'value':('',section!='bypass_prefix',description)})
         group('pbr',PBR)
         group('tunnel',TUNNEL)
     else:
@@ -349,7 +349,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
         required('connection',CONNECTION);required('network',SCALARS['network']);required('crypto',SCALARS['crypto'])
         def values(section):
             return [v for (s,i,f),v in sorted(cells.items(),key=lambda x:(x[0][0],int(x[0][1]),x[0][2])) if s==section and v]
-        for section in ['management_prefix','destination_prefix']+(['source_prefix','bypass_prefix','ingress_interface'] if mode=='pbr' else []):
+        for section in ['management_prefix','destination_prefix']+(['source_prefix','ingress_interface'] if mode=='pbr' else []):
             list_rows = sorted((int(i), v) for (s,i,f),v in cells.items() if s==section and f=='value')
             if not list_rows:
                 missing.append(section)

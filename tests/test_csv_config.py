@@ -103,6 +103,13 @@ class Checks(unittest.TestCase):
         rows=filled();source=next(r for r in rows if r['section']=='source_prefix')
         rows.append({**source,'item':'2','value':'10.10.11.0/24'})
         self.assertEqual(len(import_configuration_csv(encode(rows),[1])['provisioning_spec']['pbr']['source_prefixes']),2)
+    def test_bypass_rows_are_optional(self):
+        rows=filled()
+        for row in rows:
+            if row['section']=='bypass_prefix': row['value']=''
+        result=import_configuration_csv(encode(rows),[1])
+        self.assertTrue(result['valid'],result)
+        self.assertEqual(result['provisioning_spec']['pbr']['bypass_destination_prefixes'],[])
     def test_additional_tunnel_inherits_common_first_tunnel_fields(self):
         rows=filled()
         first=[row for row in rows if row['section']=='tunnel']

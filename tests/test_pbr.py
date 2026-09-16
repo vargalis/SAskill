@@ -39,7 +39,7 @@ class Checks(unittest.TestCase):
         self.assertEqual(cli.count(' permit ip '),5)
         self.assertIn(' permit ip 10.10.100.0 0.0.0.255 0.0.0.0 255.255.255.255',cli)
         self.assertIn(' deny ip any 10.10.10.0 0.0.0.255',cli)
-        self.assertIn(' deny ip any 203.0.113.20 0.0.0.0',cli)
+        self.assertNotIn(' deny ip any 203.0.113.20 0.0.0.0',cli)
         self.assertIn(' set interface Tunnel100',cli)
         self.assertIn(' match address local 192.168.2.110',cli)
         self.assertIn(' ip tcp adjust-mss 1350',cli)
@@ -51,6 +51,12 @@ class Checks(unittest.TestCase):
         self.assertNotIn('ip route 10.10.',cli)
         self.assertNotIn('interface Tunnel1\n',cli)
 
+    def test_all_bypasses_can_be_removed(self):
+        spec=self.spec(pbr={**policy,'bypass_destination_prefixes':[]})
+        cli=render_nonsecret(spec)['configuration_cli_preview']
+        self.assertNotIn(' deny ip ',cli)
+        self.assertEqual(cli.count(' permit ip '),5)
+
     def test_xml_coverage_without_device_qualification(self):
         result = render_netconf(self.spec())
         self.assertTrue(result['payload_complete'])
@@ -60,7 +66,6 @@ class Checks(unittest.TestCase):
 
     def test_invalid_or_unsupported_policy(self):
         for change in [dict(pbr=None), dict(pbr={**policy,'ingress_interfaces':['GigabitEthernet0/0/1\nip local policy X']}),
-                       dict(pbr={**policy,'bypass_destination_prefixes':['192.168.2.0/24']}),
                        dict(pbr={**policy,'failure_behavior':'fail-closed'}),
                        dict(pbr={**policy,'source_prefixes':['0.0.0.0/0']}),
                        dict(tunnels=[tunnel,{**tunnel,'tunnel_id':101,'headend':'203.0.113.21','address':'172.16.1.1/30'},

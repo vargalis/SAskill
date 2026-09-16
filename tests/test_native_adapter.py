@@ -4,7 +4,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 from copy import deepcopy
 from types import SimpleNamespace
 from hashlib import sha256
-from secureaccess.native_adapter import IOSXENativeAdapter,digest,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,R,NC
+from secureaccess.native_adapter import IOSXENativeAdapter,digest,digest_nonsecret_acl_order,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,A,R,NC
 from secureaccess.discovery import parse_xml
 from secureaccess.workflow import ApplyBlocked
 from test_csv_config import filled,encode
@@ -149,10 +149,35 @@ class NativeTests(unittest.TestCase):
         p=deepcopy(self.p);p['tunnel_interface_intent'][0].update(action='reuse',change_scope='review exact settings')
         _,_,_,diff=self.a._reconcile(expected,p)
         self.assertEqual(diff,[])
+    def test_referenced_pbr_acl_is_reconciled_by_sequence(self):
+        current,_,_,_=self.a._reconcile(self.d.running,self.p)
+        changed=deepcopy(self.p)
+        changed['provisioning_spec']['pbr']['bypass_destination_prefixes']=[]
+        changed['existing_objects_action']='replace_named'
+        changed['tunnel_interface_intent'][0].update(action='reuse',reuse_confirmed=True,change_scope='test')
+        _,payload,rollback,diff=self.a._reconcile(current,changed)
+        acl=payload.find(f'.//{{{A}}}extended')
+        self.assertIsNotNone(acl)
+        self.assertIsNone(acl.get(f'{{{NC}}}operation'))
+        entries=acl.findall(f'{{{A}}}access-list-seq-rule')
+        self.assertEqual([e.findtext(f'{{{A}}}sequence') for e in entries],['10'])
+        self.assertEqual([e.get(f'{{{NC}}}operation') for e in entries],['delete'])
+        reverse=rollback.find(f'.//{{{A}}}extended')
+        self.assertEqual([e.get(f'{{{NC}}}operation') for e in reverse.findall(f'{{{A}}}access-list-seq-rule')],['replace'])
+        self.assertEqual([(x['object'],x['action']) for x in diff],[('pbr_acl','replace')])
     def test_metric_default_normalization(self):
         a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd><metric>1</metric></fwd-list>')
         b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd></fwd-list>')
         self.assertEqual(digest(a),digest(b))
+    def test_acl_verification_accepts_resequence_but_not_rule_changes(self):
+        def acl(first,second='deny'):
+            return parse_xml(f'<data xmlns="{NC}"><extended xmlns="{A}"><name>x</name><access-list-seq-rule><sequence>{first}</sequence><ace-rule><action>permit</action></ace-rule></access-list-seq-rule><access-list-seq-rule><sequence>{int(first)+10}</sequence><ace-rule><action>{second}</action></ace-rule></access-list-seq-rule></extended></data>')
+        self.assertEqual(digest_nonsecret_acl_order(acl('10')),digest_nonsecret_acl_order(acl('30')))
+        self.assertNotEqual(digest_nonsecret_acl_order(acl('10')),digest_nonsecret_acl_order(acl('30','permit')))
+    def test_acl_verification_ignores_openconfig_compatibility_mirror(self):
+        left=parse_xml(f'<data xmlns="{NC}"><acl xmlns="http://openconfig.net/yang/acl"><acl-sets><acl-set><name>x</name></acl-set></acl-sets></acl><native xmlns="{N}"><hostname>r1</hostname></native></data>')
+        right=parse_xml(f'<data xmlns="{NC}"><acl xmlns="http://openconfig.net/yang/acl"><acl-sets><acl-set><name>regenerated</name></acl-set></acl-sets></acl><native xmlns="{N}"><hostname>r1</hostname></native></data>')
+        self.assertEqual(digest_nonsecret_acl_order(left),digest_nonsecret_acl_order(right))
     def test_openconfig_native_vlan_visibility_artifact_is_normalized(self):
         vlan='http://openconfig.net/yang/vlan'
         absent=parse_xml(f'<data xmlns="{NC}"><interfaces><interface><ethernet><switched-vlan><config/></switched-vlan></ethernet></interface></interfaces></data>')

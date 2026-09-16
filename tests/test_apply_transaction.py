@@ -114,6 +114,22 @@ def test_lab_running_mode_without_candidate():
     assert r['applied'] and r['configuration_verified'] and r['operational_verified']
     assert s.calls==['lock_running','edit','unlock_running','close']
 
+def test_lab_running_postcheck_timeout_keeps_verified_configuration():
+    class LabSession(Session):
+        server_capabilities=[c for c in CAPS if ':candidate:' not in c and ':confirmed-commit:' not in c]+[
+            'urn:ietf:params:netconf:capability:rollback-on-error:1.0']
+        def edit_config(self,**kw):
+            self.running='new';self.call('edit')
+    class TimeoutAdapter(Adapter):
+        def postchecks(self,s,spec,deadline): raise TimeoutError()
+    s=LabSession();a=TimeoutAdapter();store=PlanStore(clock=lambda:1)
+    public=prepare(s,a,{},'host',store)
+    p=store.consume(public['plan_id'],public['approval_digest'])
+    r=apply(s,a,p,exclusive_window=True,postcheck_budget=15,clock=lambda:2)
+    assert r['applied'] and r['status']=='applied_operational_pending'
+    assert r['configuration_verified'] and not r['operational_verified']
+    assert r['rollback_status']=='not_required' and 'inverse' not in s.calls
+
 class TransactionTests(unittest.TestCase): pass
 for name,fn in list(globals().items()):
     if name.startswith('test_') and callable(fn):

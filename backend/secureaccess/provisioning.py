@@ -65,7 +65,7 @@ class TunnelSpec(StrictModel):
 class PBRParameters(StrictModel):
     source_prefixes: list[IPv4Network] = Field(min_length=1)
     ingress_interfaces: list[str] = Field(min_length=1)
-    bypass_destination_prefixes: list[IPv4Network] = Field(min_length=1)
+    bypass_destination_prefixes: list[IPv4Network] = Field(default_factory=list)
     failure_behavior: Literal["normal-routing"]
 
     @model_validator(mode="after")
@@ -101,8 +101,6 @@ class ProvisioningSpec(StrictModel):
                 raise ValueError("Named PBR ACL requires an alphabetic prefix")
             if len(self.tunnels) > 2:
                 raise ValueError("PBR supports an ordered primary/secondary pair of VTIs")
-            if any(not any(m.subnet_of(b) for b in self.pbr.bypass_destination_prefixes) for m in self.management_prefixes):
-                raise ValueError("Management destinations must bypass PBR")
         ids = [t.tunnel_id for t in self.tunnels]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate tunnel IDs")
@@ -200,7 +198,7 @@ def render_nonsecret(spec: ProvisioningSpec) -> dict:
                       f" set interface {tunnel_order}", " exit"])
         for interface in policy.ingress_interfaces:
             lines.extend([f"interface {interface}", f" ip policy route-map {route_map}", " exit"])
-        warnings.extend(["PBR preserves existing RIB/default and management return routes; bypass destinations use normal routing",
+        warnings.extend(["PBR preserves the existing RIB/default; only explicit bypass destinations use normal routing before source permits",
                          "PBR tries selected tunnel interfaces in CSV order, then uses normal routing if none is available",
                          "Tunnel interface state is only a local availability signal; it does not prove end-to-end Secure Access reachability",
                          "Existing ACL/route-map names, interface policies, NAT and point-to-point VTI support require reconciliation"])
@@ -220,8 +218,7 @@ def pbr_acl_entries(spec: ProvisioningSpec):
     """Shared ordered classification for CLI/XML; excludes management and underlay."""
     if spec.pbr is None:
         return []
-    bypasses = sorted(set(spec.pbr.bypass_destination_prefixes + spec.management_prefixes +
-                          [IPv4Network(f"{t.headend}/32") for t in spec.tunnels]),
+    bypasses = sorted(set(spec.pbr.bypass_destination_prefixes),
                       key=lambda n: (int(n.network_address), n.prefixlen))
     return [("deny", None, destination) for destination in bypasses] + [
         ("permit", source, destination) for source in spec.pbr.source_prefixes

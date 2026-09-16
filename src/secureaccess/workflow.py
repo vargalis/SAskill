@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Protocol
 from uuid import uuid4
 import threading
+from .diagnostics import details
 
 class ApplyBlocked(RuntimeError):
     pass
@@ -97,7 +98,7 @@ def apply_running(session, adapter: TransactionAdapter, plan: PreparedPlan, *, e
     if not 15<=postcheck_budget<=300: raise ApplyBlocked('Invalid postcheck budget')
     require_running_capabilities(session)
     if not adapter.qualified_for(session,plan.spec): raise ApplyBlocked('Adapter qualification changed')
-    locked=False;edit_attempted=False;configuration_verified=False;rollback='not_required';error=None;stage='lock'
+    locked=False;edit_attempted=False;configuration_verified=False;rollback='not_required';error=None;stage='lock';diagnostic=None
     try:
         session.lock(target='running');locked=True
         stage='baseline'
@@ -125,8 +126,18 @@ def apply_running(session, adapter: TransactionAdapter, plan: PreparedPlan, *, e
                 'error':None if operational else 'Configuration is present; live SA/traffic checks are not yet satisfied',
                 'plan_id':plan.plan_id,'transaction_mode':'lab-running','startup_persisted':False,
                 'secrets_included':False}
-    except Exception:
+    except Exception as exc:
+        diagnostic=details(exc,'lab_running_'+stage)
+        verification_report=getattr(adapter,'last_verification_report',None)
+        if verification_report is not None: diagnostic['verification_report']=verification_report
         error='NETCONF running-datastore transaction failed or was uncertain at '+stage
+        if configuration_verified:
+            return {'applied':True,'status':'applied_operational_pending',
+                    'configuration_verified':True,'operational_verified':False,
+                    'rollback_status':'not_required',
+                    'error':'Configuration is present; operational postchecks did not complete',
+                    'plan_id':plan.plan_id,'transaction_mode':'lab-running','startup_persisted':False,
+                    'secrets_included':False,'diagnostic':diagnostic}
         if edit_attempted and not configuration_verified:
             try:
                 rollback='owned_inverse_verified' if adapter.rollback_running(session) else 'owned_inverse_unverified'
@@ -134,7 +145,7 @@ def apply_running(session, adapter: TransactionAdapter, plan: PreparedPlan, *, e
         return {'applied':False,'status':'failed','configuration_verified':configuration_verified,
                 'operational_verified':False,'rollback_status':rollback,'error':error,
                 'plan_id':plan.plan_id,'transaction_mode':'lab-running','startup_persisted':False,
-                'secrets_included':False}
+                'secrets_included':False,'diagnostic':diagnostic}
     finally:
         if locked:
             try: session.unlock(target='running')

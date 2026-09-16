@@ -27,8 +27,8 @@ class Checks(unittest.TestCase):
 
     def test_packet_classification_and_order(self):
         entries=self.xml().findall('.//{%s}access-list-seq-rule'%A)
-        self.assertEqual(len(entries),11)
-        self.assertEqual([int(e.findtext('{%s}sequence'%A)) for e in entries],list(range(10,120,10)))
+        self.assertEqual(len(entries),10)
+        self.assertEqual([int(e.findtext('{%s}sequence'%A)) for e in entries],list(range(10,110,10)))
         def classify(src,dst):
             for entry in entries:
                 ace=entry.find('{%s}ace-rule'%A)
@@ -42,8 +42,9 @@ class Checks(unittest.TestCase):
             return False
         for subnet in sources:
             self.assertTrue(classify(str(IPv4Network(subnet).network_address+9),'8.8.8.8'))
-        for destination in ['10.10.10.9','10.10.11.9','10.10.100.9','203.0.113.20']:
+        for destination in ['10.10.10.9','10.10.11.9','10.10.100.9']:
             self.assertFalse(classify('10.10.15.9',destination))
+        self.assertTrue(classify('10.10.15.9','203.0.113.20'))
         self.assertFalse(classify('10.2.3.9','8.8.8.8'))
 
     def test_preserve_rib(self):

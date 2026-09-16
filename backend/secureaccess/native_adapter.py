@@ -30,6 +30,7 @@ KEYS={'proposal':('name',),'policy':('name',),'keyring':('name',),'peer':('name'
       'access-list-seq-rule':('sequence',)}
 SECRET=re.compile(r'password|secret|pre-shared|private-key|community|^key$|^hex$',re.I)
 OPENCONFIG_VLAN='http://openconfig.net/yang/vlan'
+OPENCONFIG_ACL='http://openconfig.net/yang/acl'
 
 def identity(node):
     ns=etree.QName(node).namespace
@@ -91,6 +92,31 @@ def digest_nonsecret(node):
             if parent is not None: parent.remove(item)
     return digest(clean)
 
+def digest_nonsecret_acl_order(node):
+    """Compare ACL rule order and content while tolerating IOS XE resequencing."""
+    clean=deepcopy(node)
+    # IOS XE regenerates its OpenConfig ACL compatibility mirror after native
+    # ACL edits. The native ACL below is the authoritative configured object.
+    for item in list(clean.iter()):
+        if etree.QName(item).namespace==OPENCONFIG_ACL:
+            parent=item.getparent()
+            if parent is not None and etree.QName(parent).namespace!=OPENCONFIG_ACL:
+                parent.remove(item)
+    for item in list(clean.iter()):
+        if SECRET.search(etree.QName(item).localname):
+            parent=item.getparent()
+            if parent is not None: parent.remove(item)
+    for acl in clean.findall(f'.//{{{A}}}extended'):
+        entries=acl.findall(f'{{{A}}}access-list-seq-rule')
+        try:
+            ordered=sorted(entries,key=lambda entry:int(entry.findtext(f'{{{A}}}sequence')))
+        except (TypeError,ValueError):
+            ordered=entries
+        for index,entry in enumerate(ordered,1):
+            sequence=entry.find(f'{{{A}}}sequence')
+            if sequence is not None: sequence.text=str(index*10)
+    return digest(clean)
+
 def drift_scopes(before,after,limit=32):
     """Return value-free schema scopes changed between snapshots."""
     left,right=flattened(before),flattened(after);changed=[]
@@ -104,6 +130,22 @@ def drift_scopes(before,after,limit=32):
             if scope not in changed:changed.append(scope)
             if len(changed)>=limit:break
     return changed
+
+def pbr_acl_summary(tree):
+    """Value-limited ACL diagnostics; no raw XML or secret-bearing nodes."""
+    result=[]
+    for acl in tree.findall(f'.//{{{A}}}extended'):
+        rules=[]
+        for entry in acl.findall(f'{{{A}}}access-list-seq-rule'):
+            def one(name):
+                values=entry.xpath(f".//*[local-name()='{name}']/text()")
+                return values[0] if values else None
+            rules.append({'sequence':one('sequence'),'action':one('action'),
+                          'source':one('ipv4-address') or ('any' if entry.xpath(".//*[local-name()='any']") else None),
+                          'source_mask':one('mask'),'destination':one('dest-ipv4-address'),
+                          'destination_mask':one('dest-mask')})
+        result.append({'name':acl.findtext(f'{{{A}}}name'),'rules':rules})
+    return result
 
 
 def flattened(node,path=()):
@@ -156,7 +198,7 @@ class IOSXENativeAdapter:
         path=Path(__file__).resolve().parent/'schemas'/'profile.json'
         self.schemas=schemas if schemas is not None else json.loads(path.read_text(encoding='utf-8'))
         self.secret_resolver=secret_resolver
-        self.states={};self.mutex=threading.RLock()
+        self.states={};self.mutex=threading.RLock();self.last_verification_report=None
 
     def qualified_for(self,device,intent):
         caps=[str(c).strip() for c in device.server_capabilities]
@@ -258,21 +300,70 @@ class IOSXENativeAdapter:
                         replacement.append(deepcopy(child))
                 shutdown=replacement.find(f'{{{N}}}shutdown')
                 if shutdown is not None: replacement.remove(shutdown)
+            if kind=='pbr_acl' and old is not None:
+                # Sequence numbers are list keys, not ACL semantics. Preserve the
+                # keys of equivalent existing ACEs so removing bypass rules only
+                # deletes those rules instead of rewriting every permit below them.
+                def rule_without_sequence(rule):
+                    body=deepcopy(rule)
+                    sequence=body.find(f'{{{A}}}sequence')
+                    if sequence is not None: body.remove(sequence)
+                    return semantic(body)
+                available={}
+                for entry in old.findall(f'{{{A}}}access-list-seq-rule'):
+                    available.setdefault(rule_without_sequence(entry),[]).append(entry)
+                for entry in replacement.findall(f'{{{A}}}access-list-seq-rule'):
+                    matches=available.get(rule_without_sequence(entry),[])
+                    if not matches: continue
+                    prior=matches.pop(0)
+                    old_sequence=prior.find(f'{{{A}}}sequence')
+                    new_sequence=entry.find(f'{{{A}}}sequence')
+                    if old_sequence is not None and new_sequence is not None:
+                        new_sequence.text=old_sequence.text
             if old is not None and semantic(old)==semantic(replacement): return
             if old is not None and not force_replace and existing_action!='replace_named':
                 raise ApplyBlocked('Existing '+kind+' object '+str(identity(wanted)[1])+' differs; review and select existing_objects_action=replace_named')
             if old is not None: parent.remove(old)
             parent.append(deepcopy(replacement))
-            edit=deepcopy(replacement);edit.set(f'{{{NC}}}operation','replace');p_parent.append(edit)
+            if kind=='pbr_acl' and old is not None:
+                # An ACL referenced by a route-map cannot be replaced as a list root
+                # on this IOS XE build. Reconcile its keyed ACEs in place instead.
+                edit=etree.Element(replacement.tag)
+                reverse=etree.Element(old.tag)
+                for container,source in ((edit,replacement),(reverse,old)):
+                    key=source.find(f'{{{A}}}name')
+                    if key is not None: container.append(deepcopy(key))
+                old_entries={identity(x):x for x in old.findall(f'{{{A}}}access-list-seq-rule')}
+                new_entries={identity(x):x for x in replacement.findall(f'{{{A}}}access-list-seq-rule')}
+                for key in sorted(old_entries.keys()|new_entries.keys(),key=repr):
+                    prior,current=old_entries.get(key),new_entries.get(key)
+                    if prior is not None and current is not None and semantic(prior)==semantic(current): continue
+                    if current is None:
+                        change=etree.Element(prior.tag)
+                        change.append(deepcopy(prior.find(f'{{{A}}}sequence')))
+                        change.set(f'{{{NC}}}operation','delete')
+                    else:
+                        change=deepcopy(current);change.set(f'{{{NC}}}operation','replace')
+                    edit.append(change)
+                    if prior is None:
+                        undo=etree.Element(current.tag)
+                        undo.append(deepcopy(current.find(f'{{{A}}}sequence')))
+                        undo.set(f'{{{NC}}}operation','delete')
+                    else:
+                        undo=deepcopy(prior);undo.set(f'{{{NC}}}operation','replace')
+                    reverse.append(undo)
+                p_parent.append(edit);r_parent.append(reverse)
+            else:
+                edit=deepcopy(replacement);edit.set(f'{{{NC}}}operation','replace');p_parent.append(edit)
             if old is None:
                 reverse=etree.Element(wanted.tag)
                 for key in KEYS.get(etree.QName(wanted).localname,()):
                     k=wanted.find(f'{{{etree.QName(wanted).namespace}}}{key}')
                     if k is not None: reverse.append(deepcopy(k))
                 reverse.set(f'{{{NC}}}operation','delete')
-            else:
+            elif kind!='pbr_acl':
                 reverse=deepcopy(old);reverse.set(f'{{{NC}}}operation','replace')
-            r_parent.append(reverse)
+            if kind!='pbr_acl' or old is None: r_parent.append(reverse)
             # No raw baseline XML/PSK leaves in results. Interface diff exposes only reviewed fields.
             before=old
             after=replacement
@@ -374,7 +465,15 @@ class IOSXENativeAdapter:
 
     def running_matches(self,device,intent,payload):
         state=self.states.get(id(device))
-        return state is not None and digest_nonsecret(data(device,'running'))==digest_nonsecret(state[1])
+        if state is None: return False
+        current=data(device,'running')
+        matched=digest_nonsecret_acl_order(current)==digest_nonsecret_acl_order(state[1])
+        self.last_verification_report=None if matched else {
+            'changed_scopes':drift_scopes(state[1],current),
+            'expected_pbr_acls':pbr_acl_summary(state[1]),
+            'actual_pbr_acls':pbr_acl_summary(current),
+        }
+        return matched
 
     def rollback_running(self,device):
         state=self.states.get(id(device))
@@ -448,7 +547,7 @@ class IOSXENativeAdapter:
             interfaces=self._oper(device,IO,'interfaces');rib=parse_routes(self._oper(device,RO,'routing-state'))
             crypto=self._oper(device,CO,'crypto-oper-data')
             state=self.states.get(id(device))
-            good=state is not None and digest_nonsecret(data(device,'running'))==digest_nonsecret(state[1])
+            good=state is not None and digest_nonsecret_acl_order(data(device,'running'))==digest_nonsecret_acl_order(state[1])
             good=good and all(interface_up(interfaces,f'Tunnel{t.tunnel_id}') and interface_counters(interfaces,f'Tunnel{t.tunnel_id}') and
                 route_to(rib,t.headend,allow_tunnel=False,required_hop=str(spec.isp_gateway)) and
                 crypto_up(crypto,f'Tunnel{t.tunnel_id}',str(t.headend)) for t in spec.tunnels)

@@ -44,9 +44,9 @@ infer ingress PBR interface from reverse static routes or assume EIGRP/NAT suppo
 The current enrolled target is dg-wi-r1 10.2.3.1; verify live capabilities.
 
 PBR source_prefix rows identify SOURCE networks. destination_prefix rows identify
-DESTINATION networks; 0.0.0.0/0 means any destination. bypass_prefix rows exempt
-local/management destinations, plus headends. ACL deny means ordinary routing, not
-dropping. normal-routing fallback and one VTI or an ordered primary/secondary VTI pair are
+DESTINATION networks; 0.0.0.0/0 means any destination. bypass_prefix rows are optional
+explicit exemptions. Blank bypass rows generate no deny entries. ACL deny means ordinary
+routing, not dropping. normal-routing fallback and one VTI or an ordered primary/secondary VTI pair are
 supported; tracking and fail-closed are not. The route-map tries tunnel interfaces
 in CSV order. No ip local policy is generated.
 
