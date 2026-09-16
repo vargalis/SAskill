@@ -12,6 +12,7 @@ def encode(rows):
 def filled(mode='advanced'):
     rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='10.2.3.1',mode=mode)['csv_text']),delimiter=';'))
     supplied={'network':{'routing_mode':'pbr','isp_gateway':'192.168.2.1','router_wan_ip':'192.168.2.110','prefix':'SSE'},
+              'connection':{'netconf_username':'secureaccess-agent','netconf_password':'FIXTURE-PASSWORD'},
               'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
               'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
               'ingress_interface':{'value':'GigabitEthernet0/0/1'},'pbr':{'failure_behavior':'normal-routing'},
@@ -66,9 +67,10 @@ class Checks(unittest.TestCase):
     def test_test_psk_is_redacted_from_public_import_and_available_only_for_apply(self):
         text=encode(filled())
         public=import_configuration_csv(text,[1])
-        self.assertTrue(public['valid']);self.assertNotIn('FIXTURE-PSK',str(public));self.assertNotIn('_test_psks',public)
+        self.assertTrue(public['valid']);self.assertNotIn('FIXTURE-PSK',str(public));self.assertNotIn('FIXTURE-PASSWORD',str(public));self.assertNotIn('_test_psks',public)
         private=import_configuration_csv(text,[1],include_test_secrets=True)
         self.assertEqual(private['_test_psks']['100/203.0.113.20']['shared']['value'],'FIXTURE-PSK')
+        self.assertEqual(private['_test_credentials']['password'],'FIXTURE-PASSWORD')
         split=filled()
         values={'psk_mode':'split','psk_format':'hex','shared_psk':'','local_psk':'A1B2','remote_psk':'C3D4'}
         for row in split:

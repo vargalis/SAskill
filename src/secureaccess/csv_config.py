@@ -39,6 +39,10 @@ SCALARS = {
         'dpd_retries': ('3', True, 'DPD retry value used by the ISR profile. Recommended ISR guide value: 3; verify the resulting failover timing in production testing.'),
     },
 }
+CONNECTION = {
+    'netconf_username': ('secureaccess-agent', True, 'Test build only. Enter the NETCONF username.'),
+    'netconf_password': ('', True, 'Test build only. Enter the NETCONF password. It is redacted from all generated output.'),
+}
 LISTS = {
     'management_prefix': 'Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.',
     'destination_prefix': 'Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.',
@@ -92,7 +96,7 @@ BASIC_DEFAULTS = {
 }
 TUNNEL_INHERITED_FIELDS = ('source_interface','unnumbered_interface','mtu','tcp_mss')
 PSK_FIELDS = ('psk_mode','psk_format','shared_psk','local_psk','remote_psk')
-PSK_VALUE_FIELDS = ('shared_psk','local_psk','remote_psk')
+SECRET_VALUE_FIELDS = ('netconf_password','shared_psk','local_psk','remote_psk')
 
 INTERFACE_PATTERN = re.compile(r'^(GigabitEthernet|Loopback|Vlan)[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?$')
 IDENTITY_PATTERN = re.compile(r'^[A-Za-z0-9_.+\-]+@[A-Za-z0-9.\-]+$')
@@ -130,6 +134,12 @@ def _field_errors(cells, row_numbers, platform):
     if cells.get(name) and not re.fullmatch(r'[A-Za-z0-9_.-]{1,48}',cells[name]):
         add(name,'use 1-48 letters, digits, dots, underscores, or hyphens')
     ipv4(('device','1','host'))
+    username=('connection','1','netconf_username')
+    if cells.get(username) and not re.fullmatch(r'[A-Za-z0-9_.@+-]{1,128}',cells[username]):
+        add(username,'use 1-128 letters, digits, dots, underscores, @, plus signs, or hyphens')
+    password=('connection','1','netconf_password')
+    if cells.get(password) and ('\r' in cells[password] or '\n' in cells[password] or len(cells[password])>512):
+        add(password,'use 1-512 characters without line breaks')
     if platform == 'ftd':
         choice(('ftd','1','manager_type'),('FMC','FDM'))
         host=('ftd','1','manager_host')
@@ -243,6 +253,7 @@ def configuration_csv_template(platform='iosxe', name='', host='', mode='advance
         if row[0]=='meta' and row[2]=='template_mode': row[3]=mode
         if row[0]=='device': row[3]={'name':name,'host':host}[row[2]]
     if platform=='iosxe':
+        group('connection',CONNECTION)
         for section, description in LISTS.items(): group(section,{'value':('',True,description)})
         group('pbr',PBR)
         group('tunnel',TUNNEL)
@@ -273,13 +284,13 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
             if index>2001: raise ValueError('Too many CSV rows')
             if None in row or any(v is None for v in row.values()): raise ValueError('Malformed CSV row')
             section,item,field=[row[k].strip() for k in COLUMNS[:3]]
-            value=row['value'] if field in PSK_VALUE_FIELDS else row['value'].strip()
+            value=row['value'] if field in SECRET_VALUE_FIELDS else row['value'].strip()
             if value == REQUIRED_PLACEHOLDER:
                 value = ''
             if not re.fullmatch(r'[1-9][0-9]{0,3}',item): errors.append(f'Row {index}: invalid item')
             key=(section,item,field)
             if key in cells: errors.append(f'Row {index}: duplicate field')
-            if field not in PSK_VALUE_FIELDS and value.startswith(('=','+','-','@')): errors.append(f'Row {index}: formulas are not accepted')
+            if field not in SECRET_VALUE_FIELDS and value.startswith(('=','+','-','@')): errors.append(f'Row {index}: formulas are not accepted')
             if row['required'].strip() not in ('yes','no'): errors.append(f'Row {index}: required must be yes or no')
             if not row['description'].strip(): errors.append(f'Row {index}: description must not be blank')
             cells[key]=value
@@ -295,7 +306,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
             errors.append(f"Row {row_numbers.get(('meta','1','template_mode'),'unknown')}: meta.1.template_mode: enter basic or advanced")
         if errors: return {**base,'valid':False,'errors':errors}
         allowed={s:set(fields) for s,fields in SCALARS.items() if platform=='iosxe' or s in ('meta','device')}
-        allowed.update({'ftd':set(FTD)} if platform=='ftd' else {**{s:{'value'} for s in LISTS},'pbr':set(PBR),'tunnel':set(TUNNEL)})
+        allowed.update({'ftd':set(FTD)} if platform=='ftd' else {**{s:{'value'} for s in LISTS},'connection':set(CONNECTION),'pbr':set(PBR),'tunnel':set(TUNNEL)})
         for index,((s,i,f),v) in enumerate(cells.items(),2):
             if s not in allowed or f not in allowed[s] or (s not in LISTS and s!='tunnel' and i!='1'):
                 errors.append(f'Row {index}: unknown field or section/item')
@@ -335,7 +346,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
         existing_action=value('network','existing_objects_action') or 'reject'
         if existing_action not in ('reject','replace_named'): raise ValueError('Invalid existing object action')
         mode=value('network','routing_mode')
-        required('network',SCALARS['network']);required('crypto',SCALARS['crypto'])
+        required('connection',CONNECTION);required('network',SCALARS['network']);required('crypto',SCALARS['crypto'])
         def values(section):
             return [v for (s,i,f),v in sorted(cells.items(),key=lambda x:(x[0][0],int(x[0][1]),x[0][2])) if s==section and v]
         for section in ['management_prefix','destination_prefix']+(['source_prefix','bypass_prefix','ingress_interface'] if mode=='pbr' else []):
@@ -396,7 +407,9 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
         output={**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'inherited_fields':inherited_fields,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
                 'tunnel_interface_intent':intent,'existing_objects_action':existing_action,'result':render_nonsecret(spec),'netconf_preview':xml,
                 'blockers':list(dict.fromkeys(blockers+['CSV approval is not device apply authorization']+xml['blockers']))}
-        if include_test_secrets: output['_test_psks']=test_psks
+        if include_test_secrets:
+            output['_test_psks']=test_psks
+            output['_test_credentials']={'username':value('connection','netconf_username'),'password':value('connection','netconf_password')}
         return output
     except ValidationError as error:
         return {**base,'valid':False,'errors':[

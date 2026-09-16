@@ -28,11 +28,12 @@ SERVER_BUILD = os.environ.get('SECUREACCESS_BUILD_ID','unknown')
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 
 
-def session():
-    password = load_password()
-    if not password:
+def session(credentials=None):
+    username = credentials.get('username') if credentials else USER
+    password = credentials.get('password') if credentials else load_password()
+    if not username or not password:
         raise RuntimeError("credential-missing")
-    return manager.connect(host=HOST, port=830, username=USER, password=password,
+    return manager.connect(host=HOST, port=830, username=username, password=password,
                            hostkey_verify=True, allow_agent=False, look_for_keys=False,
                            timeout=30, device_params={"name": "iosxe"})
 
@@ -48,10 +49,11 @@ def connection_status() -> dict:
             keys.load(str(path))
         return {"host": HOST, "port": 830, "username": USER,
                 "credential_present": bool(load_password()),
+                "csv_credentials_supported": True,
                 "host_key_enrolled": bool(keys.lookup(f"[{HOST}]:830") or keys.lookup(HOST)),
                 "mode": "read-and-transactional-apply", "apply_mechanism_implemented": True, "apply_available": None}
     except Exception:
-        return {"error": "Local credential/key check failed; check native secret store or explicit environment provider"}
+        return {"error": "Native credential/key check failed", "csv_credentials_supported": True}
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -177,13 +179,13 @@ MUTATION = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHi
 @mcp.tool(annotations=READ_ONLY)
 def prepare_configuration_apply(csv_text: str, transaction_mode: str = "auto") -> dict:
     """Prepare an exact private plan. Auto uses candidate when available, otherwise guarded lab running mode. No writes."""
-    preliminary=import_configuration_csv(csv_text)
+    preliminary=import_configuration_csv(csv_text,include_test_secrets=True)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
         return {'apply_ready':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
     if preliminary['target']['host']!=HOST:
         return {'apply_ready':False,'device_written':False,'error':'CSV target differs from enrolled router'}
     try:
-        with session() as device:
+        with session(preliminary.get('_test_credentials')) as device:
             routes = read_routing(device)
             parsed = import_configuration_csv(csv_text, routes.get('occupied_tunnel_ids'), include_test_secrets=True)
             if not parsed.get('valid') or parsed.get('platform') != 'iosxe':
@@ -218,12 +220,14 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
         consumed = True
         if plan.target != HOST:
             raise ApplyBlocked('Plan target differs from enrolled router')
-        device = session()
+        credentials=plan.spec.get('_test_credentials') if isinstance(plan.spec,dict) else None
+        device = session(credentials)
         adapter = select_transaction_adapter(device,plan.spec)
         adapter.secret_resolver=load_tunnel_psk
         execution_started = True
         return apply(device,adapter,plan,exclusive_window=exclusive_window,
-                     confirm_timeout=confirm_timeout,postcheck_budget=postcheck_budget,reconnect=session)
+                     confirm_timeout=confirm_timeout,postcheck_budget=postcheck_budget,
+                     reconnect=lambda:session(credentials))
     except ApplyBlocked as error:
         return {'applied':False,'error':str(error),'plan_consumed':consumed}
     except Exception:
@@ -239,13 +243,13 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
 def validate_configuration_csv(csv_text: str) -> dict:
     """Validate the reconciled CSV, including an optional test PSK, with NETCONF test-only. Returns only a redacted public diff."""
     device=None;adapter=None
-    preliminary=import_configuration_csv(csv_text)
+    preliminary=import_configuration_csv(csv_text,include_test_secrets=True)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
         return {'validated':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
     if preliminary['target']['host']!=HOST:
         return {'validated':False,'device_written':False,'error':'CSV target differs from enrolled router'}
     try:
-        device=session()
+        device=session(preliminary.get('_test_credentials'))
         routes=read_routing(device)
         parsed=import_configuration_csv(csv_text,routes.get('occupied_tunnel_ids'),include_test_secrets=True)
         if not parsed.get('valid') or parsed.get('platform')!='iosxe':

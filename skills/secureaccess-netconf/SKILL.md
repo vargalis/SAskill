@@ -25,8 +25,10 @@ For multiple tunnel items, explain that blank source_interface, unnumbered_inter
 mtu, and tcp_mss values inherit from the first tunnel; report inherited_fields from
 the preview. Never inherit interface_name, headend, local_identity, address, action,
 or distance.
-Template mode is offline. Use native local setup for the router login and verified
-SSH host-key enrollment; connection_status checks readiness only, not live access.
+Template mode is offline. This test build accepts `connection.netconf_username` and
+`connection.netconf_password` in CSV; the native login store remains optional. SSH
+host-key verification is still mandatory. connection_status checks native readiness
+only and does not inspect CSV credentials or prove live access.
 This test build accepts tunnel PSKs in CSV. `psk_mode=shared` uses `shared_psk`;
 `psk_mode=split` uses `local_psk` and `remote_psk`. `psk_format` accepts plain,
 type6, or hex. Never echo PSKs in previews, diffs, diagnostics, or logs. The native

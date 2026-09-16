@@ -24,7 +24,7 @@ Exact model/submodule digests are checked against NETCONF get-schema. Current
 device features/deviations are enforced by server inline validation. Missing or
 unknown pre/postcheck evidence blocks or rolls back. Credentials/PSKs/private XML
 are redacted from previews, results, diffs, diagnostics, and logs. The test build accepts
-shared or split PSKs directly in CSV; the native vault remains available as an alternative.
+NETCONF credentials and shared or split PSKs directly in CSV; native stores remain optional.
 Candidate and confirmed commit are preferred. On a lab ISR without them, the adapter
 requires validate and rollback-on-error, locks running, uses test-then-set, verifies
 the resulting nonsecret state, and retains an inverse patch for failed writes. Hardware schema/SA/

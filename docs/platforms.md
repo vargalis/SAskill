@@ -25,9 +25,9 @@ encrypted type 6, and hexadecimal. Prompts are hidden and require confirmation.
 The test build can instead store the same values directly in CSV.
 
 Headless Linux may explicitly set `SECUREACCESS_SECRET_PROVIDER=environment` and
-provide `ISR_PASSWORD` from its process secret manager. Tunnel PSKs currently
-require a native keyring. Router login credentials remain outside CSV. PSKs from a
-test CSV are redacted from generated previews, diffs, diagnostics, and logs.
+provide `ISR_PASSWORD` from its process secret manager. The test build can instead
+read the NETCONF username/password and tunnel PSKs from CSV. These values are
+redacted from generated previews, diffs, diagnostics, and logs.
 
 SSH host keys are verified through `~/.ssh/known_hosts`. Secrets do not migrate
 between machines automatically.
