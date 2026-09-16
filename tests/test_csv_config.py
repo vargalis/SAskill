@@ -15,7 +15,7 @@ def filled(mode='advanced'):
               'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
               'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
               'ingress_interface':{'value':'GigabitEthernet0/0/1'},'pbr':{'failure_behavior':'normal-routing'},
-              'tunnel':{'interface_name':'Tunnel100','action':'create','headend':'203.0.113.20','local_identity':'test@example.com','source_interface':'GigabitEthernet0/0/0','address':'172.16.0.1/30','mtu':'1390','tcp_mss':'1350','distance':'1'}}
+              'tunnel':{'interface_name':'Tunnel100','action':'create','headend':'203.0.113.20','local_identity':'test@example.com','psk_mode':'shared','psk_format':'plain','shared_psk':'FIXTURE-PSK','source_interface':'GigabitEthernet0/0/0','address':'172.16.0.1/30','mtu':'1390','tcp_mss':'1350','distance':'1'}}
     supplied['crypto']={k:('|'.join(map(str,v)) if isinstance(v,list) else str(v)) for k,v in CryptoParameters().model_dump().items() if v is not None}
     for row in rows: row['value']=supplied.get(row['section'],{}).get(row['field'],row['value'])
     return rows
@@ -63,6 +63,18 @@ class Checks(unittest.TestCase):
             if change=='formula': rows[0]['value']='=EXTERNAL()'
             r=import_configuration_csv(encode(rows),[1])
             self.assertFalse(r['valid']);self.assertNotIn('DO-NOT-ECHO',str(r))
+    def test_test_psk_is_redacted_from_public_import_and_available_only_for_apply(self):
+        text=encode(filled())
+        public=import_configuration_csv(text,[1])
+        self.assertTrue(public['valid']);self.assertNotIn('FIXTURE-PSK',str(public));self.assertNotIn('_test_psks',public)
+        private=import_configuration_csv(text,[1],include_test_secrets=True)
+        self.assertEqual(private['_test_psks']['100/203.0.113.20']['shared']['value'],'FIXTURE-PSK')
+        split=filled()
+        values={'psk_mode':'split','psk_format':'hex','shared_psk':'','local_psk':'A1B2','remote_psk':'C3D4'}
+        for row in split:
+            if row['section']=='tunnel' and row['field'] in values: row['value']=values[row['field']]
+        parsed=import_configuration_csv(encode(split),[1],include_test_secrets=True)
+        self.assertTrue(parsed['valid'],parsed);self.assertEqual(parsed['_test_psks']['100/203.0.113.20']['mode'],'split')
     def test_field_specific_validation_errors(self):
         cases=[
             ('device','host','not-an-ip','device.1.host: enter an IPv4 address'),

@@ -19,15 +19,15 @@ python scripts/setup_local.py password
 python scripts/setup_local.py tunnel-psk
 ```
 
-The tunnel PSK action asks for Tunnel ID, headend, shared or split keys, and the
-format of each key. Supported formats are plain IOS type 0, IOS encrypted type 6,
-and hexadecimal. Prompts are hidden and require confirmation. The CSV stores no
-PSK. A stored PSK is scoped to the enrolled router, Tunnel ID, and headend.
+The native-vault tunnel PSK action asks for Tunnel ID, headend, shared or split
+keys, and the format of each key. Supported formats are plain IOS type 0, IOS
+encrypted type 6, and hexadecimal. Prompts are hidden and require confirmation.
+The test build can instead store the same values directly in CSV.
 
 Headless Linux may explicitly set `SECUREACCESS_SECRET_PROVIDER=environment` and
 provide `ISR_PASSWORD` from its process secret manager. Tunnel PSKs currently
-require a native keyring. Never put credentials or PSKs in chat, CSV, `.mcp.json`,
-YAML, command arguments, or logs.
+require a native keyring. Router login credentials remain outside CSV. PSKs from a
+test CSV are redacted from generated previews, diffs, diagnostics, and logs.
 
 SSH host keys are verified through `~/.ssh/known_hosts`. Secrets do not migrate
 between machines automatically.

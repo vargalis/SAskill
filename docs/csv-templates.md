@@ -4,7 +4,8 @@ Schema version 2 input is UTF-8 BOM CSV with semicolon delimiter and columns
 section;item;field;value;required;description. Fill value only. For multiple
 networks, copy a list row and assign a distinct positive item number. For
 multiple tunnels, copy its field group with a distinct item. Never use formulas
-or password/PSK fields. Required flags are explanatory, not validation authority.
+or router password fields. The IOS XE test template includes redacted PSK input
+fields. Required flags are explanatory, not validation authority.
 
 Agent creates CSV, prefills ONLY user-confirmed values and sanitized authorized
 live discovery. Label observed/suggested values in descriptions; do not assume

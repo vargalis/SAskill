@@ -155,7 +155,11 @@ class IOSXENativeAdapter:
 
     def _reconcile(self,baseline,intent):
         spec,selections,existing_action=self._intent(intent)
-        desired=parse_xml(render_netconf(spec,self.secret_resolver)['configuration_xml_preview'])
+        inline_psks=intent.get('_test_psks',{}) if isinstance(intent,dict) else {}
+        def resolve_psk(tunnel_id,headend):
+            value=inline_psks.get(f'{tunnel_id}/{headend}')
+            return value if value is not None else (self.secret_resolver(tunnel_id,headend) if self.secret_resolver else None)
+        desired=parse_xml(render_netconf(spec,resolve_psk)['configuration_xml_preview'])
         expected=deepcopy(baseline);payload=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap)
         rollback=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap);diff=[]
         # Atom paths are generated locally; never selected by caller XML/XPath.
@@ -400,7 +404,8 @@ class IOSXENativeAdapter:
             match=next((r for r in rings if r.findtext(f'{{{C}}}name')==keyring),None)
             peers=match.findall(f'{{{C}}}peer') if match is not None else []
             entry=next((p for p in peers if p.findtext(f'{{{C}}}name')==peer),None)
-            stored=self.secret_resolver(t.tunnel_id,str(t.headend)) if self.secret_resolver is not None else None
+            stored=(intent.get('_test_psks',{}).get(f'{t.tunnel_id}/{t.headend}') if isinstance(intent,dict) else None)
+            if stored is None and self.secret_resolver is not None: stored=self.secret_resolver(t.tunnel_id,str(t.headend))
             if stored is None and (entry is None or not psk_present(entry)):
                 raise ApplyBlocked('No PSK is available for this tunnel in the native secret store or selected device peer')
             if entry is not None:

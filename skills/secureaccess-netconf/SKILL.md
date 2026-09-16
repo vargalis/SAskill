@@ -16,7 +16,7 @@ Recommend Basic. Basic shows only deployment-specific decisions and applies the
 built-in Cisco recommendations for omitted fields. Advanced exposes every supported
 field and its recommendation. Do not create the CSV until the user selects a mode.
 
-Create a public template with create_configuration_csv and pass the selected mode. Read the locally filled
+Create a template with create_configuration_csv and pass the selected mode. Read the locally filled
 CSV and send its text to preview_configuration_csv. Return missing fields and
 errors; do not invent headends, identities, crypto choices or interface selections.
 Present row-specific validation errors with the accepted format, values, or range;
@@ -25,13 +25,12 @@ For multiple tunnel items, explain that blank source_interface, unnumbered_inter
 mtu, and tcp_mss values inherit from the first tunnel; report inherited_fields from
 the preview. Never inherit interface_name, headend, local_identity, address, action,
 or distance.
-Template mode is offline. Use native local setup for credentials and verified SSH
-host-key enrollment; connection_status checks readiness only, not live access.
-Never request passwords/PSKs in chat, CSV, tool arguments or shell commands. Use
-`scripts/setup_local.py tunnel-psk` for an interactive hidden prompt. It supports a
-shared PSK or separate local/remote PSKs, each as plain type 0, IOS encrypted type 6,
-or hexadecimal input. Read ../../docs/platforms.md for native store behavior. No
-automatic plaintext fallback.
+Template mode is offline. Use native local setup for the router login and verified
+SSH host-key enrollment; connection_status checks readiness only, not live access.
+This test build accepts tunnel PSKs in CSV. `psk_mode=shared` uses `shared_psk`;
+`psk_mode=split` uses `local_psk` and `remote_psk`. `psk_format` accepts plain,
+type6, or hex. Never echo PSKs in previews, diffs, diagnostics, or logs. The native
+vault remains an optional alternative. Read ../../docs/platforms.md.
 
 ## Routing and Tunnel selection
 
@@ -74,7 +73,7 @@ prepare_configuration_apply uses candidate/confirmed-commit when available. On a
 explicitly enrolled lab ISR without those capabilities, auto mode can prepare a
 `lab-running` plan only when validate and rollback-on-error are advertised. Both
 modes require the actual NETCONF client return address/RIB, source interface and a
-matching device or native-vault PSK. The tool returns the exact public diff, expiring
+matching CSV, device, or native-vault PSK. The tool returns the exact public diff, expiring
 one-use plan ID and digest. Existing PSKs are preserved in memory and never
 transferred implicitly to another headend.
 

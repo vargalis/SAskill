@@ -1,23 +1,28 @@
-﻿section;item;field;value;required;description
-meta;1;schema_version;2;yes;Keep 2. This identifies the CSV schema and must not be edited.
-meta;1;platform;iosxe;yes;Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.
-meta;1;template_mode;basic;no;Template presentation mode: basic or advanced. Basic omits parameters that have built-in recommended defaults.
-device;1;name;<<< REQUIRED >>>;yes;Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.
-device;1;host;<<< REQUIRED >>>;yes;Enter the NETCONF management IPv4 address, for example 10.2.3.1. Do not enter the WAN address.
-network;1;routing_mode;<<< REQUIRED >>>;yes;Enter static or pbr. Recommendation: use pbr when selected source LANs must reach 0.0.0.0/0 through Secure Access.
-network;1;isp_gateway;<<< REQUIRED >>>;yes;Enter the current ISP next-hop IPv4 address. Recommendation: copy it from the verified active default route.
-network;1;router_wan_ip;<<< REQUIRED >>>;yes;Enter the router WAN IPv4 address used by the IKEv2 policy local-address match. It can be private when the ISR is behind NAT.
-management_prefix;1;value;<<< REQUIRED >>>;yes;Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.
-destination_prefix;1;value;<<< REQUIRED >>>;yes;Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.
-source_prefix;1;value;<<< REQUIRED >>>;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
-bypass_prefix;1;value;<<< REQUIRED >>>;yes;Enter one destination that must use normal routing, in CIDR notation. Include management/local destinations and the Secure Access headend as /32 to prevent recursion.
-ingress_interface;1;value;<<< REQUIRED >>>;yes;Enter the IOS XE LAN interface where matching traffic arrives, for example GigabitEthernet0/0/1. Cisco requires the route-map on the ingress interface.
-tunnel;1;interface_name;<<< REQUIRED >>>;yes;Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.
-tunnel;1;action;<<< REQUIRED >>>;yes;Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.
-tunnel;1;headend;<<< REQUIRED >>>;yes;Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.
-tunnel;1;local_identity;<<< REQUIRED >>>;yes;Enter the Tunnel ID/email from the Secure Access portal. Never place the tunnel passphrase or PSK in this CSV.
-tunnel;1;source_interface;<<< REQUIRED >>>;yes;Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.
-tunnel;1;address;;no;Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.
-tunnel;1;unnumbered_interface;;no;"Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address."
-tunnel;1;reuse_confirmed;;no;For action=reuse, enter true only after reviewing the current interface and the exact proposed changes.
-tunnel;1;change_scope;;no;"For action=reuse, describe the exact approved fields that may change; leave blank for action=create."
+﻿section;item;field;value;required;description
+meta;1;schema_version;2;yes;Keep 2. This identifies the CSV schema and must not be edited.
+meta;1;platform;iosxe;yes;Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.
+meta;1;template_mode;basic;no;Template presentation mode: basic or advanced. Basic omits parameters that have built-in recommended defaults.
+device;1;name;<<< REQUIRED >>>;yes;Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.
+device;1;host;<<< REQUIRED >>>;yes;Enter the NETCONF management IPv4 address, for example 10.2.3.1. Do not enter the WAN address.
+network;1;routing_mode;<<< REQUIRED >>>;yes;Enter static or pbr. Recommendation: use pbr when selected source LANs must reach 0.0.0.0/0 through Secure Access.
+network;1;isp_gateway;<<< REQUIRED >>>;yes;Enter the current ISP next-hop IPv4 address. Recommendation: copy it from the verified active default route.
+network;1;router_wan_ip;<<< REQUIRED >>>;yes;Enter the router WAN IPv4 address used by the IKEv2 policy local-address match. It can be private when the ISR is behind NAT.
+management_prefix;1;value;<<< REQUIRED >>>;yes;Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.
+destination_prefix;1;value;<<< REQUIRED >>>;yes;Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.
+source_prefix;1;value;<<< REQUIRED >>>;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+bypass_prefix;1;value;<<< REQUIRED >>>;yes;Enter one destination that must use normal routing, in CIDR notation. Include management/local destinations and the Secure Access headend as /32 to prevent recursion.
+ingress_interface;1;value;<<< REQUIRED >>>;yes;Enter the IOS XE LAN interface where matching traffic arrives, for example GigabitEthernet0/0/1. Cisco requires the route-map on the ingress interface.
+tunnel;1;interface_name;<<< REQUIRED >>>;yes;Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.
+tunnel;1;action;<<< REQUIRED >>>;yes;Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.
+tunnel;1;headend;<<< REQUIRED >>>;yes;Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.
+tunnel;1;local_identity;<<< REQUIRED >>>;yes;Enter the Tunnel ID/email from the Secure Access portal.
+tunnel;1;psk_mode;shared;yes;Test build only. Enter shared for one bidirectional PSK or split for separate local and remote PSKs.
+tunnel;1;psk_format;plain;yes;Test build only. Enter plain, type6, or hex. Split mode applies the selected format to both keys.
+tunnel;1;shared_psk;;no;Test build only. Enter the tunnel passphrase when psk_mode=shared.
+tunnel;1;local_psk;;no;Test build only. Enter the local signing key when psk_mode=split.
+tunnel;1;remote_psk;;no;Test build only. Enter the remote verification key when psk_mode=split.
+tunnel;1;source_interface;<<< REQUIRED >>>;yes;Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.
+tunnel;1;address;;no;Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.
+tunnel;1;unnumbered_interface;;no;"Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address."
+tunnel;1;reuse_confirmed;;no;For action=reuse, enter true only after reviewing the current interface and the exact proposed changes.
+tunnel;1;change_scope;;no;"For action=reuse, describe the exact approved fields that may change; leave blank for action=create."

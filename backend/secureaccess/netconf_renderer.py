@@ -176,7 +176,7 @@ def render_netconf(spec: ProvisioningSpec, psk_resolver=None) -> dict:
             'blockers': (['Exact device ACL/route-map schemas and deviations must be checked against reference mapping; PBR is not lab-qualified'] if spec.pbr else []) + ['Device deviations and complete imported YANG schema set not validated',
                          'No running-config reconciliation, full YANG validation or live post-checks',
                          'Candidate and confirmed commit unavailable in supplied router inventory',
-                         'New keyring peers require manual PSK provisioning'],
+                         'Apply requires a PSK from the test CSV, native vault, or an existing matching peer'],
             'warning': 'Offline preview only; never send directly to a router. Merge alone does not reconcile conflicting choices or algorithms.'}
 
 

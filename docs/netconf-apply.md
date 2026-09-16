@@ -12,8 +12,9 @@ CSV is the default input; no wizard is required. FMC/FDM templates remain a late
    seven model/submodule digests from dg-wi-r1, reconciles each selected object and
    sends the complete proposed datastore as inline `validate` source (NETCONF 1.1).
    This does not call edit-config or commit and works without candidate.
-3. Store the tunnel PSK through `scripts/setup_local.py tunnel-psk`. Shared and
-   separate local/remote keys are supported as type 0, type 6, or hex.
+3. For the test build, place the tunnel PSK in the CSV. Shared and separate
+   local/remote keys are supported as plain type 0, encrypted type 6, or hex.
+   The native-vault workflow remains available as an alternative.
 4. `prepare_configuration_apply` additionally checks management client return
    address, global operational RIB, ISP gateway/source interface, pre-provisioned
    peer PSKs and transaction capabilities. It returns the exact public diff and
@@ -39,7 +40,7 @@ object is reused. The diff shows the exact selected identities and before/after
 public configuration. ACL/route-map replacement removes stale rules. Ingress policy
 replacement is explicit. PSKs stay in memory and are never exported or moved to a
 different headend. Unrelated keyring peers remain unchanged. New authentication
-requires native/manual PSK provisioning first; no CSV PSK values are accepted.
+requires a matching CSV, native-vault, or existing device PSK.
 Management static routes are retained. PBR does not replace the ISP default or the
 five local routes. Static protected prefixes overlapping management are rejected.
 

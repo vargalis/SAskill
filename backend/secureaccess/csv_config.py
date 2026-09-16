@@ -1,4 +1,4 @@
-"""Public CSV configuration templates and strict offline plan import. No device I/O."""
+"""CSV configuration templates and strict offline plan import. No device I/O."""
 import csv
 import io
 import re
@@ -50,7 +50,12 @@ TUNNEL = {
     'interface_name': ('', True, 'Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.'),
     'action': ('', True, 'Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.'),
     'headend': ('', True, 'Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.'),
-    'local_identity': ('', True, 'Enter the Tunnel ID/email from the Secure Access portal. Never place the tunnel passphrase or PSK in this CSV.'),
+    'local_identity': ('', True, 'Enter the Tunnel ID/email from the Secure Access portal.'),
+    'psk_mode': ('shared', True, 'Test build only. Enter shared for one bidirectional PSK or split for separate local and remote PSKs.'),
+    'psk_format': ('plain', True, 'Test build only. Enter plain, type6, or hex. Split mode applies the selected format to both keys.'),
+    'shared_psk': ('', False, 'Test build only. Enter the tunnel passphrase when psk_mode=shared.'),
+    'local_psk': ('', False, 'Test build only. Enter the local signing key when psk_mode=split.'),
+    'remote_psk': ('', False, 'Test build only. Enter the remote verification key when psk_mode=split.'),
     'source_interface': ('', True, 'Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.'),
     'address': ('', False, 'Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.'),
     'unnumbered_interface': ('', False, 'Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address.'),
@@ -86,6 +91,8 @@ BASIC_DEFAULTS = {
     ('tunnel', 'distance'): '1',
 }
 TUNNEL_INHERITED_FIELDS = ('source_interface','unnumbered_interface','mtu','tcp_mss')
+PSK_FIELDS = ('psk_mode','psk_format','shared_psk','local_psk','remote_psk')
+PSK_VALUE_FIELDS = ('shared_psk','local_psk','remote_psk')
 
 INTERFACE_PATTERN = re.compile(r'^(GigabitEthernet|Loopback|Vlan)[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?$')
 IDENTITY_PATTERN = re.compile(r'^[A-Za-z0-9_.+\-]+@[A-Za-z0-9.\-]+$')
@@ -184,6 +191,18 @@ def _field_errors(cells, row_numbers, platform):
         elif cells.get(interface_name) and int(cells[interface_name][6:])>2147483647:
             add(interface_name,'tunnel ID must not exceed 2147483647')
         choice(base('action'),('create','reuse'));ipv4(base('headend'))
+        choice(base('psk_mode'),('shared','split'));choice(base('psk_format'),('plain','type6','hex'))
+        psk_mode=cells.get(base('psk_mode'),'');psk_format=cells.get(base('psk_format'),'')
+        shared=cells.get(base('shared_psk'),'');local=cells.get(base('local_psk'),'');remote=cells.get(base('remote_psk'),'')
+        if psk_mode=='shared' and (local or remote):
+            add(base('shared_psk'),'shared mode requires blank local_psk/remote_psk')
+        if psk_mode=='split' and shared:
+            add(base('local_psk'),'split mode requires a blank shared_psk')
+        for key_value,key_name in ((shared,'shared_psk'),(local,'local_psk'),(remote,'remote_psk')):
+            if key_value and ('\r' in key_value or '\n' in key_value or len(key_value)>512):
+                add(base(key_name),'use 1-512 characters without line breaks')
+            if key_value and psk_format=='hex' and (len(key_value)%2 or not re.fullmatch(r'[0-9A-Fa-f]+',key_value)):
+                add(base(key_name),'hex keys require an even number of hexadecimal characters')
         identity=base('local_identity')
         if cells.get(identity) and (len(cells[identity])>255 or not IDENTITY_PATTERN.fullmatch(cells[identity])):
             add(identity,'enter the portal Tunnel ID/email, for example tunnel-id@example.com')
@@ -239,9 +258,9 @@ def configuration_csv_template(platform='iosxe', name='', host='', mode='advance
     writer.writerow(COLUMNS);writer.writerows(rows)
     return {'csv_text':stream.getvalue(),'encoding':'utf-8-sig','delimiter':';','schema_version':'2',
             'platform':platform,'template_mode':mode,'apply_available':False,
-            'note':'FTD template is planning-only; no FTD API/configuration adapter implemented' if platform=='ftd' else 'Fill values only; copy list/tunnel rows with distinct item numbers. No passwords or PSKs.'}
+            'note':'FTD template is planning-only; no FTD API/configuration adapter implemented' if platform=='ftd' else 'Test build: tunnel PSKs are accepted in CSV and are redacted from previews, diffs, and logs.'}
 
-def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
+def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_secrets=False):
     base={'apply_available':False,'apply_ready':False}
     if not isinstance(csv_text,str) or len(csv_text)>200000:
         return {**base,'valid':False,'errors':['CSV size/type invalid']}
@@ -253,13 +272,14 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         for index,row in enumerate(reader,2):
             if index>2001: raise ValueError('Too many CSV rows')
             if None in row or any(v is None for v in row.values()): raise ValueError('Malformed CSV row')
-            section,item,field,value=[row[k].strip() for k in COLUMNS[:4]]
+            section,item,field=[row[k].strip() for k in COLUMNS[:3]]
+            value=row['value'] if field in PSK_VALUE_FIELDS else row['value'].strip()
             if value == REQUIRED_PLACEHOLDER:
                 value = ''
             if not re.fullmatch(r'[1-9][0-9]{0,3}',item): errors.append(f'Row {index}: invalid item')
             key=(section,item,field)
             if key in cells: errors.append(f'Row {index}: duplicate field')
-            if value.startswith(('=','+','-','@')): errors.append(f'Row {index}: formulas are not accepted')
+            if field not in PSK_VALUE_FIELDS and value.startswith(('=','+','-','@')): errors.append(f'Row {index}: formulas are not accepted')
             if row['required'].strip() not in ('yes','no'): errors.append(f'Row {index}: required must be yes or no')
             if not row['description'].strip(): errors.append(f'Row {index}: description must not be blank')
             cells[key]=value
@@ -329,17 +349,30 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
             errors.append('PBR values require routing_mode=pbr')
         items=sorted({i for s,i,f in cells if s=='tunnel'},key=int)
         if not items: missing.append('tunnel')
-        tunnels=[];intent=[];blockers=[]
+        tunnels=[];intent=[];blockers=[];test_psks={}
         for item in items:
             required('tunnel',TUNNEL,item)
             t={f:v for (s,i,f),v in cells.items() if s=='tunnel' and i==item and v}
             name=t.pop('interface_name','');action=t.pop('action','')
             confirmed=t.pop('reuse_confirmed','');scope=t.pop('change_scope','')
+            psk_mode=t.pop('psk_mode','');psk_format=t.pop('psk_format','')
+            shared=t.pop('shared_psk','');local=t.pop('local_psk','');remote=t.pop('remote_psk','')
+            if psk_mode=='shared' and not shared: missing.append(f'tunnel.{item}.shared_psk')
+            if psk_mode=='split':
+                if not local: missing.append(f'tunnel.{item}.local_psk')
+                if not remote: missing.append(f'tunnel.{item}.remote_psk')
             if not name or not action:
                 continue
             if not re.fullmatch(r'Tunnel[1-9][0-9]{0,9}',name) or action not in ('create','reuse'):
                 errors.append(f'tunnel.{item}: choose TunnelN and create/reuse');continue
             number=int(name[6:]);t['tunnel_id']=number
+            def encoded(secret):
+                return {'format':'hex','value':secret} if psk_format=='hex' else {
+                    'format':'key','encryption':6 if psk_format=='type6' else 0,'value':secret}
+            if psk_mode=='shared' and shared:
+                test_psks[f'{number}/{t.get("headend","")}']={'mode':'shared','shared':encoded(shared)}
+            elif psk_mode=='split' and local and remote:
+                test_psks[f'{number}/{t.get("headend","")}']={'mode':'split','local':encoded(local),'remote':encoded(remote)}
             if action=='reuse' and (confirmed!='true' or not scope): missing.append(f'tunnel.{item}.reuse_confirmed/change_scope')
             if action=='create' and (confirmed or scope): errors.append(f'tunnel.{item}: reuse fields require reuse action')
             if occupied_tunnel_ids is None: blockers.append('Fresh occupied tunnel inventory not supplied; interface action unverified')
@@ -360,9 +393,11 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None):
         from .wizard import Target
         target=Target.model_validate({'name':value('device','name'),'host':value('device','host')})
         xml=render_netconf(spec)
-        return {**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'inherited_fields':inherited_fields,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
+        output={**base,'valid':True,'platform':'iosxe','template_mode':template_mode,'inherited_fields':inherited_fields,'target':target.model_dump(mode='json'),'provisioning_spec':spec.model_dump(mode='json'),
                 'tunnel_interface_intent':intent,'existing_objects_action':existing_action,'result':render_nonsecret(spec),'netconf_preview':xml,
                 'blockers':list(dict.fromkeys(blockers+['CSV approval is not device apply authorization']+xml['blockers']))}
+        if include_test_secrets: output['_test_psks']=test_psks
+        return output
     except ValidationError as error:
         return {**base,'valid':False,'errors':[
             'Invalid parameter '+'.'.join(map(str,e['loc']))+': '+e['msg'] for e in error.errors(include_input=False)]}

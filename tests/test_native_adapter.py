@@ -114,6 +114,12 @@ class NativeTests(unittest.TestCase):
                 self.assertNotIn(secret,str(diff))
             self.assertIn('pre-shared-key',wire)
             self.assertIn('operation="replace"',__import__('lxml').etree.tostring(rollback,encoding='unicode'))
+    def test_csv_psk_is_injected_without_a_vault_and_redacted_from_diff(self):
+        parsed=import_configuration_csv(encode(filled()),[1],include_test_secrets=True)
+        parsed['existing_objects_action']='replace_named'
+        _,payload,_,diff=self.a._reconcile(self.d.running,parsed)
+        wire=__import__('lxml').etree.tostring(payload,encoding='unicode')
+        self.assertIn('FIXTURE-PSK',wire);self.assertNotIn('FIXTURE-PSK',str(diff))
     def test_longest_prefix_tunnel_recursion_not_hidden_by_default(self):
         routes=[{'network':__import__('ipaddress').IPv4Network('0.0.0.0/0'),'hops':['192.168.2.1'],'interfaces':['GigabitEthernet0/0/0']},
                 {'network':__import__('ipaddress').IPv4Network('203.0.113.20/32'),'hops':[],'interfaces':['Tunnel1']}]

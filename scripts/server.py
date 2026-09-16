@@ -75,7 +75,7 @@ def secureaccess_wizard(state: WizardState | None = None, answer: dict | None = 
 
 @mcp.tool(annotations=READ_ONLY)
 def generate_secureaccess_configuration(spec: ProvisioningSpec) -> dict:
-    """Generate the full IKEv2/IPsec/keyring/VTI/static-route review configuration. No password or PSK fields; no device writes."""
+    """Generate a redacted IKEv2/IPsec/keyring/VTI/static-route review configuration. No device writes."""
     return render_nonsecret(spec)
 
 
@@ -185,7 +185,7 @@ def prepare_configuration_apply(csv_text: str, transaction_mode: str = "auto") -
     try:
         with session() as device:
             routes = read_routing(device)
-            parsed = import_configuration_csv(csv_text, routes.get('occupied_tunnel_ids'))
+            parsed = import_configuration_csv(csv_text, routes.get('occupied_tunnel_ids'), include_test_secrets=True)
             if not parsed.get('valid') or parsed.get('platform') != 'iosxe':
                 return {'apply_ready':False,'error':'Incomplete or invalid IOS XE CSV; use preview_configuration_csv'}
             if parsed['target']['host'] != HOST:
@@ -205,7 +205,7 @@ def prepare_configuration_apply(csv_text: str, transaction_mode: str = "auto") -
 @mcp.tool(annotations=MUTATION)
 def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_window: bool,
                              confirm_timeout: int = 180, postcheck_budget: int = 60) -> dict:
-    """Apply only after the user approves this exact prepared diff/digest and an exclusive change window. One-use; never auto-retry an uncertain commit. No raw XML/PSK input."""
+    """Apply only after approval of the exact diff/digest and an exclusive window. PSKs may originate in the prepared test CSV but are never returned."""
     if exclusive_window is not True:
         return {'applied':False,'error':'Exclusive configuration window must be confirmed'}
     if not (30 <= postcheck_budget <= 300 and postcheck_budget+60 <= confirm_timeout <= 600):
@@ -237,7 +237,7 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
 
 @mcp.tool(annotations=READ_ONLY)
 def validate_configuration_csv(csv_text: str) -> dict:
-    """Validate the reconciled CSV on the enrolled router with NETCONF edit-config test-only. The RPC applies no configuration and works without candidate. Returns a public diff, never credentials/PSK."""
+    """Validate the reconciled CSV, including an optional test PSK, with NETCONF test-only. Returns only a redacted public diff."""
     device=None;adapter=None
     preliminary=import_configuration_csv(csv_text)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
@@ -247,7 +247,7 @@ def validate_configuration_csv(csv_text: str) -> dict:
     try:
         device=session()
         routes=read_routing(device)
-        parsed=import_configuration_csv(csv_text,routes.get('occupied_tunnel_ids'))
+        parsed=import_configuration_csv(csv_text,routes.get('occupied_tunnel_ids'),include_test_secrets=True)
         if not parsed.get('valid') or parsed.get('platform')!='iosxe':
             return {'validated':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
         if parsed['target']['host']!=HOST:
