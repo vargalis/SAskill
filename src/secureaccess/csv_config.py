@@ -40,8 +40,8 @@ SCALARS = {
     },
 }
 CONNECTION = {
-    'netconf_username': ('secureaccess-agent', True, 'Test build only. Enter the NETCONF username.'),
-    'netconf_password': ('', True, 'Test build only. Enter the NETCONF password. It is redacted from all generated output.'),
+    'username': ('secureaccess-agent', True, 'Test build only. Enter the NETCONF username.'),
+    'password': ('', True, 'Test build only. Enter the NETCONF password. It is redacted from all generated output.'),
 }
 LISTS = {
     'management_prefix': 'Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.',
@@ -96,7 +96,7 @@ BASIC_DEFAULTS = {
 }
 TUNNEL_INHERITED_FIELDS = ('source_interface','unnumbered_interface','mtu','tcp_mss')
 PSK_FIELDS = ('psk_mode','psk_format','shared_psk','local_psk','remote_psk')
-SECRET_VALUE_FIELDS = ('netconf_password','shared_psk','local_psk','remote_psk')
+SECRET_VALUE_FIELDS = ('password','shared_psk','local_psk','remote_psk')
 
 INTERFACE_PATTERN = re.compile(r'^(GigabitEthernet|Loopback|Vlan)[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?$')
 IDENTITY_PATTERN = re.compile(r'^[A-Za-z0-9_.+\-]+@[A-Za-z0-9.\-]+$')
@@ -134,10 +134,10 @@ def _field_errors(cells, row_numbers, platform):
     if cells.get(name) and not re.fullmatch(r'[A-Za-z0-9_.-]{1,48}',cells[name]):
         add(name,'use 1-48 letters, digits, dots, underscores, or hyphens')
     ipv4(('device','1','host'))
-    username=('connection','1','netconf_username')
+    username=('connection','1','username')
     if cells.get(username) and not re.fullmatch(r'[A-Za-z0-9_.@+-]{1,128}',cells[username]):
         add(username,'use 1-128 letters, digits, dots, underscores, @, plus signs, or hyphens')
-    password=('connection','1','netconf_password')
+    password=('connection','1','password')
     if cells.get(password) and ('\r' in cells[password] or '\n' in cells[password] or len(cells[password])>512):
         add(password,'use 1-512 characters without line breaks')
     if platform == 'ftd':
@@ -409,7 +409,7 @@ def import_configuration_csv(csv_text, occupied_tunnel_ids=None, include_test_se
                 'blockers':list(dict.fromkeys(blockers+['CSV approval is not device apply authorization']+xml['blockers']))}
         if include_test_secrets:
             output['_test_psks']=test_psks
-            output['_test_credentials']={'username':value('connection','netconf_username'),'password':value('connection','netconf_password')}
+            output['_test_credentials']={'username':value('connection','username'),'password':value('connection','password')}
         return output
     except ValidationError as error:
         return {**base,'valid':False,'errors':[

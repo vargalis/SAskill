@@ -19,8 +19,8 @@ crypto;1;ike_lifetime;14400;yes;IKE rekey interval in seconds. Recommended Secur
 crypto;1;ipsec_lifetime;3600;yes;Child SA/IPsec rekey interval in seconds. Recommended Secure Access default: 3600 seconds (1 hour).
 crypto;1;dpd_interval;10;yes;"DPD interval in seconds. The Cisco ISR example uses 10 seconds; use 30 seconds when intentionally matching the Secure Access 156-second maximum timeout design."
 crypto;1;dpd_retries;3;yes;"DPD retry value used by the ISR profile. Recommended ISR guide value: 3; verify the resulting failover timing in production testing."
-connection;1;netconf_username;secureaccess-agent;yes;Test build only. Enter the NETCONF username.
-connection;1;netconf_password;<<< REQUIRED >>>;yes;Test build only. Enter the NETCONF password. It is redacted from all generated output.
+connection;1;username;secureaccess-agent;yes;Test build only. Enter the NETCONF username.
+connection;1;password;<<< REQUIRED >>>;yes;Test build only. Enter the NETCONF password. It is redacted from all generated output.
 management_prefix;1;value;<<< REQUIRED >>>;yes;Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.
 destination_prefix;1;value;<<< REQUIRED >>>;yes;Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.
 source_prefix;1;value;<<< REQUIRED >>>;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."

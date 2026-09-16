@@ -12,7 +12,7 @@ def encode(rows):
 def filled(mode='advanced'):
     rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='10.2.3.1',mode=mode)['csv_text']),delimiter=';'))
     supplied={'network':{'routing_mode':'pbr','isp_gateway':'192.168.2.1','router_wan_ip':'192.168.2.110','prefix':'SSE'},
-              'connection':{'netconf_username':'secureaccess-agent','netconf_password':'FIXTURE-PASSWORD'},
+              'connection':{'username':'secureaccess-agent','password':'FIXTURE-PASSWORD'},
               'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
               'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
               'ingress_interface':{'value':'GigabitEthernet0/0/1'},'pbr':{'failure_behavior':'normal-routing'},
