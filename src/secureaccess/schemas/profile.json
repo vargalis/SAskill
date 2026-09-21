@@ -2,36 +2,36 @@
   "Cisco-IOS-XE-acl": {
     "revision": "2021-07-01",
     "sha256": "026871a95913c0cb6e1ac4cf391bd5ce3ac5b23f79eba196996e834692dd1fef",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-crypto": {
     "revision": "2022-07-20",
     "sha256": "45061dd3c03b83eca7a066a2f16c332f1423e386ea0cf6f68e293f904eb53ff6",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-interfaces": {
     "revision": "2022-07-01",
     "sha256": "7b993fa2d739b076921c28cbc12a3aa1faecfdab2c6adac7a36d7dfe8cf1834f",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-ip": {
     "revision": "2022-07-01",
     "sha256": "cb060a6d2abd9f6f6b253ad2f159f05dcbec395e9f5d6de301100e22062971e8",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-native": {
     "revision": "2022-08-01",
     "sha256": "ee95b7eb37b00eacb2d4044c282c7e0b7562ba2694e3f065a61eb35dc8dd4980",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-route-map": {
     "revision": "2022-07-01",
     "sha256": "4c7227858487fcb827cdcf292433d4386d28af3065c11df215bb0c56a708806f",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   },
   "Cisco-IOS-XE-tunnel": {
     "revision": "2022-03-01",
     "sha256": "d78465f4157dcda29357ef98e4874710db95ffcf596d47f7d0cd0f3fc15bbd01",
-    "source": "NETCONF get-schema dg-wi-r1"
+    "source": "NETCONF get-schema qualification device"
   }
 }

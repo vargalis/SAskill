@@ -1,4 +1,4 @@
-# CSV → IOS XE NETCONF
+# CSV â†’ IOS XE NETCONF
 
 The IOS XE native VPN/PBR adapter is implemented and registered. It covers IKEv2
 proposal/policy/keyring peer/profile, IPsec transform/profile, selected TunnelN,
@@ -9,7 +9,7 @@ CSV is the default input; no wizard is required. FMC/FDM templates remain a late
 
 1. Fill the public CSV; `preview_configuration_csv` validates its structure.
 2. `validate_configuration_csv` fetches current config only in memory, checks exact
-   seven model/submodule digests from dg-wi-r1, reconciles each selected object and
+   seven model/submodule digests from the qualification router, reconciles each selected object and
    sends the complete proposed datastore as inline `validate` source (NETCONF 1.1).
    This does not call edit-config or commit and works without candidate.
 3. For the test build, place the tunnel PSK in the CSV. Shared and separate
@@ -46,7 +46,7 @@ five local routes. Static protected prefixes overlapping management are rejected
 
 ## Validation evidence and current router
 
-The shipped schema profile was read live from dg-wi-r1 via NETCONF get-schema.
+The shipped schema profile was read live from the qualification router via NETCONF get-schema.
 Unit tests exercise reconciliation, preservation, conflict rejection, exact schema
 selection, transaction failures, owned partial cleanup, rollback and commit uncertainty.
 Unit tests do not prove hardware application or rollback behavior.
@@ -61,7 +61,7 @@ that credential. Therefore no inline validate RPC, edit-config or commit was iss
 by this development run. The direct validation helper was attempted and failed
 before NETCONF connection because its native credential was unavailable. After loading the updated plugin, use the inline validation
 tool first. Installation is intentionally deferred at the user's request.
-Running→startup persistence is a separate operation.
+Runningâ†’startup persistence is a separate operation.
 
 Reference: https://www.rfc-editor.org/rfc/rfc6241.html#section-8.6.5.1
 

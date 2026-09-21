@@ -32,7 +32,7 @@
 
 На последнем шаге показывай собранные параметры и спрашивай о создании плана/шаблона. Ответ передается как review="confirmed". Это не авторизация применения. Итоговый provisioning_spec сохраняй как YAML, result.configuration_cli_preview — как текстовую конфигурацию для review. Отдельно перечисли manual_secret_steps. Не объявляй туннель работоспособным без PSK и operational проверки.
 
-На текущем этапе NETCONF-цель фиксирована на 10.2.3.1. Другие адреса допускаются для планирования, но не подключаются автоматически. Готовность management/NETCONF в wizard — заявление пользователя, а не результат live prechecks. Missing baseline допускает preview, но не device diff. Шаблоны не требуют активного подключения. Секреты для входа хранятся вне state.
+The connection target must match SECUREACCESS_HOST configured locally. Other targets are planning-only. Wizard readiness answers do not replace live prechecks. Templates need no connection. Credentials are not stored in wizard state.
 
 Routing review: live modes now include a routing step before network parameters.
 Use routing_summary for sanitized interfaces/masks, static routes, default routes

@@ -31,3 +31,7 @@ redacted from generated previews, diffs, diagnostics, and logs.
 
 SSH host keys are verified through `~/.ssh/known_hosts`. Secrets do not migrate
 between machines automatically.
+
+### Local target configuration
+
+Before starting the server or local setup, set `SECUREACCESS_HOST` to your router management address. Set `SECUREACCESS_USER` when using stored credentials; CSV login credentials are also supported. No router address or username is built in. Restart the server after changing these environment variables. Fill `<<< REQUIRED >>>` fields in a private copy of the CSV template. Never commit the filled deployment file.

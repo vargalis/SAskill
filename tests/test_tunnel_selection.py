@@ -6,7 +6,7 @@ from secureaccess.wizard import WizardState,wizard_step
 
 class Checks(unittest.TestCase):
     def state(self):
-        return WizardState(mode='new',target={'name':'dg-wi-r1','host':'10.2.3.1'},bootstrap={'management_ready':True,'netconf_ready':True},routing={'reviewed':True,'occupied_tunnel_ids':[1,2],'preserve_tunnel_ids':[1,2]},network={'isp_gateway':'192.168.2.1','router_wan_ip':'192.168.2.110','management_prefixes':['10.10.10.0/24'],'protected_prefixes':['0.0.0.0/0']})
+        return WizardState(mode='new',target={'name':'test-router','host':'198.51.100.1'},bootstrap={'management_ready':True,'netconf_ready':True},routing={'reviewed':True,'occupied_tunnel_ids':[1,2],'preserve_tunnel_ids':[1,2]},network={'isp_gateway':'192.0.2.1','router_wan_ip':'192.0.2.110','management_prefixes':['10.77.10.0/24'],'protected_prefixes':['0.0.0.0/0']})
     def test_create_occupied_rejected(self):
         self.assertIn('error',wizard_step(self.state(),{'tunnel_numbers':[{'interface_name':'Tunnel1','action':'create'}]}))
     def test_existing_selection_and_review(self):

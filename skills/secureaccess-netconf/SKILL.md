@@ -41,7 +41,7 @@ routing_summary. Show configured routes and operational RIB separately, default
 route, interface masks and occupied Tunnel IDs. Errors/empty data mean unknown.
 Preserve the actual management client return path and ISP/headend underlay. Never
 infer ingress PBR interface from reverse static routes or assume EIGRP/NAT support.
-The current enrolled target is dg-wi-r1 10.2.3.1; verify live capabilities.
+Set SECUREACCESS_HOST locally to the intended router management address; there is no default target. Set SECUREACCESS_USER for locally stored credentials, or supply the login in the private CSV. Verify live capabilities.
 
 PBR source_prefix rows identify SOURCE networks. destination_prefix rows identify
 DESTINATION networks; 0.0.0.0/0 means any destination. bypass_prefix rows are optional

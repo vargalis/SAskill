@@ -10,11 +10,11 @@ from secureaccess.provisioning import CryptoParameters
 def encode(rows):
     stream=io.StringIO(newline='');w=csv.DictWriter(stream,COLUMNS,delimiter=';');w.writeheader();w.writerows(rows);return stream.getvalue()
 def filled(mode='advanced'):
-    rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='10.2.3.1',mode=mode)['csv_text']),delimiter=';'))
-    supplied={'network':{'routing_mode':'pbr','isp_gateway':'192.168.2.1','router_wan_ip':'192.168.2.110','prefix':'SSE'},
+    rows=list(csv.DictReader(io.StringIO(configuration_csv_template(name='test',host='198.51.100.1',mode=mode)['csv_text']),delimiter=';'))
+    supplied={'network':{'routing_mode':'pbr','isp_gateway':'192.0.2.1','router_wan_ip':'192.0.2.110','prefix':'SSE'},
               'connection':{'username':'secureaccess-agent','password':'FIXTURE-PASSWORD'},
-              'management_prefix':{'value':'10.10.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
-              'source_prefix':{'value':'10.10.10.0/24'},'bypass_prefix':{'value':'10.10.10.0/24'},
+              'management_prefix':{'value':'10.77.10.0/24'},'destination_prefix':{'value':'0.0.0.0/0'},
+              'source_prefix':{'value':'10.77.10.0/24'},'bypass_prefix':{'value':'10.77.10.0/24'},
               'ingress_interface':{'value':'GigabitEthernet0/0/1'},'pbr':{'failure_behavior':'normal-routing'},
               'tunnel':{'interface_name':'Tunnel100','action':'create','headend':'203.0.113.20','local_identity':'test@example.com','psk_mode':'shared','psk_format':'plain','shared_psk':'FIXTURE-PSK','source_interface':'GigabitEthernet0/0/0','address':'172.16.0.1/30','mtu':'1390','tcp_mss':'1350','distance':'1'}}
     supplied['crypto']={k:('|'.join(map(str,v)) if isinstance(v,list) else str(v)) for k,v in CryptoParameters().model_dump().items() if v is not None}
@@ -38,10 +38,10 @@ class Checks(unittest.TestCase):
     def test_complete_and_no_device_write(self):
         r=import_configuration_csv('\ufeff'+encode(filled()),[1])
         self.assertTrue(r['valid'],r)
-        self.assertEqual(r['provisioning_spec']['pbr']['source_prefixes'],['10.10.10.0/24'])
+        self.assertEqual(r['provisioning_spec']['pbr']['source_prefixes'],['10.77.10.0/24'])
         self.assertEqual(r['provisioning_spec']['protected_prefixes'],['0.0.0.0/0'])
-        self.assertEqual(r['provisioning_spec']['router_wan_ip'],'192.168.2.110')
-        self.assertIn('match address local 192.168.2.110',r['result']['configuration_cli_preview'])
+        self.assertEqual(r['provisioning_spec']['router_wan_ip'],'192.0.2.110')
+        self.assertIn('match address local 192.0.2.110',r['result']['configuration_cli_preview'])
         self.assertNotIn('ip route 0.0.0.0',r['result']['configuration_cli_preview'])
         self.assertFalse(r['apply_ready'])
     def test_basic_omits_recommended_fields_and_expands_defaults(self):
@@ -81,7 +81,7 @@ class Checks(unittest.TestCase):
         cases=[
             ('device','host','not-an-ip','device.1.host: enter an IPv4 address'),
             ('crypto','dh_groups','19|14','crypto.1.dh_groups: enter unique supported groups'),
-            ('source_prefix','value','10.10.10.1/24','source_prefix.1.value: enter canonical IPv4 CIDR'),
+            ('source_prefix','value','10.77.10.1/24','source_prefix.1.value: enter canonical IPv4 CIDR'),
             ('ingress_interface','value','Loopback0','ingress_interface.1.value: enter a physical or VLAN'),
             ('tunnel','local_identity','invalid','tunnel.1.local_identity: enter the portal Tunnel ID/email'),
             ('tunnel','mtu','1400','tunnel.1.mtu: enter an integer from 576 to 1390'),
@@ -101,7 +101,7 @@ class Checks(unittest.TestCase):
         self.assertFalse(import_configuration_csv(encode(rows),[1])['valid'])
     def test_multiple_sources(self):
         rows=filled();source=next(r for r in rows if r['section']=='source_prefix')
-        rows.append({**source,'item':'2','value':'10.10.11.0/24'})
+        rows.append({**source,'item':'2','value':'10.77.11.0/24'})
         self.assertEqual(len(import_configuration_csv(encode(rows),[1])['provisioning_spec']['pbr']['source_prefixes']),2)
     def test_bypass_rows_are_optional(self):
         rows=filled()

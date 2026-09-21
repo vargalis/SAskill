@@ -1,4 +1,5 @@
 """Interactive local credential setup; never invoke with a password argument."""
+import os
 import argparse
 import base64
 import getpass
@@ -8,15 +9,19 @@ from pathlib import Path
 import paramiko
 from local_secrets import native_vault, save_tunnel_psk, delete_tunnel_psk
 
-HOST = "10.2.3.1"
-USER = "secureaccess-agent"
-SERVICE = "Agent-for-SecureAccess/10.2.3.1"
+HOST = os.environ.get("SECUREACCESS_HOST", "").strip()
+USER = os.environ.get("SECUREACCESS_USER", "").strip()
+SERVICE = "Agent-for-SecureAccess/" + os.environ.get("SECUREACCESS_HOST", "").strip()
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["password", "host-key", "delete-password", "tunnel-psk", "delete-tunnel-psk"])
     args = parser.parse_args()
+    if not HOST:
+        parser.error("Configure SECUREACCESS_HOST first")
+    if args.action in ("password", "delete-password") and not USER:
+        parser.error("Configure SECUREACCESS_USER first")
     if args.action == "password":
         vault = native_vault()
         password = getpass.getpass("NETCONF password (hidden): ")

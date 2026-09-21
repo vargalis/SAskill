@@ -17,7 +17,7 @@ SCALARS = {
     },
     'device': {
         'name': ('', True, 'Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.'),
-        'host': ('', True, 'Enter the NETCONF management IPv4 address, for example 10.2.3.1. Do not enter the WAN address.'),
+        'host': ('', True, 'Enter the NETCONF management IPv4 address. Do not enter the WAN address.'),
     },
     'network': {
         'existing_objects_action': ('', False, 'Leave blank to reject name conflicts. Use replace_named only after reviewing an exact diff of the named objects.'),
@@ -44,7 +44,7 @@ CONNECTION = {
     'password': ('', True, 'Test build only. Enter the NETCONF password. It is redacted from all generated output.'),
 }
 LISTS = {
-    'management_prefix': 'Enter a management network in CIDR notation, for example 10.10.10.0/24. Recommendation: bypass it from PBR to preserve router access.',
+    'management_prefix': 'Enter a management network in CIDR notation, for example 198.51.100.0/24. Recommendation: bypass it from PBR to preserve router access.',
     'destination_prefix': 'Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.',
     'source_prefix': 'Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access.',
     'bypass_prefix': 'Optional. Enter a destination that must use normal routing. Leave every bypass row blank to generate only source-to-destination permit entries.',
@@ -125,7 +125,7 @@ def _field_errors(cells, row_numbers, platform):
         try:
             (IPv4Interface if interface else IPv4Network)(value, **({} if interface else {'strict':True}))
         except ValueError:
-            add(key,'enter canonical IPv4 CIDR notation, for example 10.10.10.0/24')
+            add(key,'enter canonical IPv4 CIDR notation, for example 198.51.100.0/24')
     def choice(key, choices):
         value=cells.get(key,'')
         if value and value not in choices: add(key,'enter one of: '+', '.join(choices))

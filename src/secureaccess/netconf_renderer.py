@@ -168,7 +168,7 @@ def render_netconf(spec: ProvisioningSpec, psk_resolver=None) -> dict:
             'schema_revisions': {'Cisco-IOS-XE-crypto': '2022-07-20', 'Cisco-IOS-XE-tunnel': '2022-03-01', 'Cisco-IOS-XE-native': '2022-08-01', 'Cisco-IOS-XE-ip': '2022-07-01'},
             'manual_secret_steps': review['manual_secret_steps'],
             'pbr_schema_provenance': ({
-                'native_and_interfaces': 'Live get-schema from enrolled 10.2.3.1',
+                'native_and_interfaces': 'Live get-schema from qualification device',
                 'acl_reference': 'Cisco bundle xe/17121 Cisco-IOS-XE-acl@2023-07-01',
                 'route_map_reference': 'Cisco bundle xe/17121 Cisco-IOS-XE-route-map@2023-07-01',
                 'advertised_device_revisions': {'Cisco-IOS-XE-acl': '2021-07-01', 'Cisco-IOS-XE-route-map': '2022-07-01'},

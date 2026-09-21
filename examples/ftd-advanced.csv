@@ -1,9 +1,9 @@
-﻿section;item;field;value;required;description
+section;item;field;value;required;description
 meta;1;schema_version;2;yes;Keep 2. This identifies the CSV schema and must not be edited.
 meta;1;platform;ftd;yes;Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.
 meta;1;template_mode;advanced;no;Template presentation mode: basic or advanced. Basic omits parameters that have built-in recommended defaults.
 device;1;name;<<< REQUIRED >>>;yes;Enter the inventory name of the router, for example branch-r1. Recommendation: use the existing hostname.
-device;1;host;<<< REQUIRED >>>;yes;Enter the NETCONF management IPv4 address, for example 10.2.3.1. Do not enter the WAN address.
+device;1;host;<<< REQUIRED >>>;yes;Enter the NETCONF management IPv4 address. Do not enter the WAN address.
 ftd;1;manager_type;<<< REQUIRED >>>;yes;Enter FMC or FDM according to the system that manages this FTD. The FTD adapter is planning-only.
 ftd;1;manager_host;<<< REQUIRED >>>;yes;Enter the management IPv4 address or resolvable hostname of FMC/FDM.
 ftd;1;device_id;<<< REQUIRED >>>;yes;"Enter the exact device identifier used by the manager API; do not guess it from the hostname."

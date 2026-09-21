@@ -36,3 +36,7 @@ Run scripts/validate_adapter.py with the plugin Python runtime under the user wh
 native secret store contains the enrolled credentials. It performs inline GCM/CBC
 schema tests only. scripts/validate_csv.py validates a filled public CSV the same way.
 Reload the updated plugin to use the latest MCP diagnostics.
+
+### Local target configuration
+
+Before starting the server or local setup, set `SECUREACCESS_HOST` to your router management address. Set `SECUREACCESS_USER` when using stored credentials; CSV login credentials are also supported. No router address or username is built in. Restart the server after changing these environment variables. Fill `<<< REQUIRED >>>` fields in a private copy of the CSV template. Never commit the filled deployment file.

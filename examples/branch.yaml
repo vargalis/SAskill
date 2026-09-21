@@ -1,14 +1,15 @@
+# Fill placeholders with deployment values before validation.
 router:
-  host: 192.0.2.10
+  host: "<REQUIRED>"
   port: 830
-  username: netconf-agent
+  username: "<REQUIRED>"
   password:
     env: ISR_PASSWORD
   timeout: 30
 secure_access:
-  headend: 198.51.100.20
-  local_identity: branch-isr-01
-  remote_identity: replace-with-secure-access-identity
+  headend: "<REQUIRED>"
+  local_identity: "<REQUIRED>"
+  remote_identity: "<REQUIRED>"
   psk:
     env: SSE_PSK
   ike_encryption: aes-cbc-256
@@ -16,12 +17,12 @@ secure_access:
   dh_group: 19
   ipsec_transform: esp-gcm-256
 tunnel:
-  name: Tunnel100
-  source_interface: GigabitEthernet0/0/0
-  address: 169.254.10.2/30
-  mtu: 1400
+  name: "<REQUIRED>"
+  source_interface: "<REQUIRED>"
+  address: "<REQUIRED>"
+  mtu: 1390
 routing:
-  isp_gateway: 192.0.2.1
-  management_network: 203.0.113.0/24
+  isp_gateway: "<REQUIRED>"
+  management_network: "<REQUIRED>"
   protected_networks:
     - 0.0.0.0/0

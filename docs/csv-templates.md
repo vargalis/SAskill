@@ -11,8 +11,8 @@ not validation authority.
 Agent creates CSV, prefills ONLY user-confirmed values and sanitized authorized
 live discovery. Label observed/suggested values in descriptions; do not assume
 source interfaces, WAN IP, crypto defaults, bypass sets or fallback confirmation.
-For dg-wi-r1 sources are the five 10.10.* /24 static-route networks, destination
-is 0.0.0.0/0, ISP gateway is 192.168.2.1, management is 10.10.10.0/24.
+Supply your source networks, ISP gateway, and management prefixes. Use destination
+0.0.0.0/0 only when all destinations should be directed through the tunnel.
 TunnelN and create/reuse are explicit choices; Tunnel1 is not hard-coded.
 `network.router_wan_ip` is the selected tunnel source interface IPv4 address and
 is rendered as `crypto ikev2 policy ... match address local`. In PBR mode, one or

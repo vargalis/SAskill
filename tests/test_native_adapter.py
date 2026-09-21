@@ -11,10 +11,10 @@ from test_csv_config import filled,encode
 from secureaccess.csv_config import import_configuration_csv
 
 BASE=f'''<data xmlns="{NC}"><native xmlns="{N}">
-<hostname>test</hostname><interface><GigabitEthernet><name>0/0/0</name><ip><address><primary><address>192.168.2.110</address><mask>255.255.255.0</mask></primary></address></ip></GigabitEthernet>
+<hostname>test</hostname><interface><GigabitEthernet><name>0/0/0</name><ip><address><primary><address>192.0.2.110</address><mask>255.255.255.0</mask></primary></address></ip></GigabitEthernet>
 <GigabitEthernet><name>0/0/1</name></GigabitEthernet><Tunnel><name>1</name><shutdown/><description>untouched</description></Tunnel></interface>
-<ip><route><ip-route-interface-forwarding-list><prefix>0.0.0.0</prefix><mask>0.0.0.0</mask><fwd-list><fwd>192.168.2.1</fwd></fwd-list></ip-route-interface-forwarding-list>
-<ip-route-interface-forwarding-list><prefix>10.10.10.0</prefix><mask>255.255.255.0</mask><fwd-list><fwd>10.2.3.2</fwd></fwd-list></ip-route-interface-forwarding-list></route></ip>
+<ip><route><ip-route-interface-forwarding-list><prefix>0.0.0.0</prefix><mask>0.0.0.0</mask><fwd-list><fwd>192.0.2.1</fwd></fwd-list></ip-route-interface-forwarding-list>
+<ip-route-interface-forwarding-list><prefix>10.77.10.0</prefix><mask>255.255.255.0</mask><fwd-list><fwd>198.51.100.2</fwd></fwd-list></ip-route-interface-forwarding-list></route></ip>
 <crypto><ikev2 xmlns="{C}"><keyring><name>SSE-KEYRING-100</name><peer><name>SSE-PEER-100</name><address><ipv4><ipv4-address>203.0.113.20</ipv4-address><ipv4-mask>255.255.255.255</ipv4-mask></ipv4></address><pre-shared-key><key>FIXTURE-SECRET-NEVER-OUTPUT</key></pre-shared-key></peer>
 <peer><name>unrelated</name><pre-shared-key><key>OTHER-SECRET</key></pre-shared-key></peer></keyring></ikev2></crypto></native></data>'''
 def intent():
@@ -121,7 +121,7 @@ class NativeTests(unittest.TestCase):
         wire=__import__('lxml').etree.tostring(payload,encoding='unicode')
         self.assertIn('FIXTURE-PSK',wire);self.assertNotIn('FIXTURE-PSK',str(diff))
     def test_longest_prefix_tunnel_recursion_not_hidden_by_default(self):
-        routes=[{'network':__import__('ipaddress').IPv4Network('0.0.0.0/0'),'hops':['192.168.2.1'],'interfaces':['GigabitEthernet0/0/0']},
+        routes=[{'network':__import__('ipaddress').IPv4Network('0.0.0.0/0'),'hops':['192.0.2.1'],'interfaces':['GigabitEthernet0/0/0']},
                 {'network':__import__('ipaddress').IPv4Network('203.0.113.20/32'),'hops':[],'interfaces':['Tunnel1']}]
         self.assertFalse(route_to(routes,'203.0.113.20'))
     def test_unrelated_ike_sa_or_interface_not_accepted(self):
@@ -166,8 +166,8 @@ class NativeTests(unittest.TestCase):
         self.assertEqual([e.get(f'{{{NC}}}operation') for e in reverse.findall(f'{{{A}}}access-list-seq-rule')],['replace'])
         self.assertEqual([(x['object'],x['action']) for x in diff],[('pbr_acl','replace')])
     def test_metric_default_normalization(self):
-        a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd><metric>1</metric></fwd-list>')
-        b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd></fwd-list>')
+        a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd><metric>1</metric></fwd-list>')
+        b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd></fwd-list>')
         self.assertEqual(digest(a),digest(b))
     def test_acl_verification_accepts_resequence_but_not_rule_changes(self):
         def acl(first,second='deny'):
@@ -194,26 +194,26 @@ class NativeTests(unittest.TestCase):
         self.assertNotEqual(digest(canonical),digest(materialized))
     def test_prechecks_actual_client_and_missing_psk(self):
         from types import SimpleNamespace
-        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.10.10.9',4444))))
+        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.77.10.9',4444))))
         self.d.server_capabilities=Device.server_capabilities+['http://test?module='+n+'&revision='+rev for n,rev in [('Cisco-IOS-XE-interfaces-oper','2021-03-01'),('Cisco-IOS-XE-crypto-oper','2021-03-01'),('ietf-routing','2015-05-25')]]
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.10.10.0/24</destination-prefix><next-hop><next-hop-address>10.2.3.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.168.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.77.10.0/24</destination-prefix><next-hop><next-hop-address>198.51.100.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.0.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
         interfaces=parse_xml(f'<data xmlns="{NC}"><interfaces xmlns="{IO}"><interface><name>GigabitEthernet0/0/0</name><admin-status>if-state-up</admin-status><oper-status>if-oper-state-ready</oper-status></interface></interfaces></data>')
         self.a._oper=lambda device,ns,root:routing if ns==RO else interfaces
         self.assertTrue(self.a.prechecks(self.d,self.p))
         self.d.running.find(f'.//{{{C}}}peer/{{{C}}}pre-shared-key').getparent().remove(self.d.running.find(f'.//{{{C}}}peer/{{{C}}}pre-shared-key'))
         with self.assertRaises(ApplyBlocked):self.a.prechecks(self.d,self.p)
     def test_prechecks_reject_wan_ip_mismatch(self):
-        self.p['provisioning_spec']['router_wan_ip']='192.168.2.111'
-        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.10.10.9',4444))))
+        self.p['provisioning_spec']['router_wan_ip']='192.0.2.111'
+        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.77.10.9',4444))))
         self.d.server_capabilities=Device.server_capabilities+['http://test?module='+n+'&revision='+rev for n,rev in [('Cisco-IOS-XE-interfaces-oper','2021-03-01'),('Cisco-IOS-XE-crypto-oper','2021-03-01'),('ietf-routing','2015-05-25')]]
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.10.10.0/24</destination-prefix><next-hop><next-hop-address>10.2.3.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.168.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.77.10.0/24</destination-prefix><next-hop><next-hop-address>198.51.100.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.0.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
         interfaces=parse_xml(f'<data xmlns="{NC}"><interfaces xmlns="{IO}"><interface><name>GigabitEthernet0/0/0</name><admin-status>if-state-up</admin-status><oper-status>if-oper-state-ready</oper-status></interface></interfaces></data>')
         self.a._oper=lambda device,ns,root:routing if ns==RO else interfaces
         with self.assertRaisesRegex(ApplyBlocked,'router_wan_ip'):
             self.a.prechecks(self.d,self.p)
     def test_client_outside_management_rejected(self):
         self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.99.99.9',4444))))
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><rib><name>ipv4-default</name><routes><route><destination-prefix>0.0.0.0/0</destination-prefix><next-hop><next-hop-address>192.168.2.1</next-hop-address></next-hop></route></routes></rib></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><rib><name>ipv4-default</name><routes><route><destination-prefix>0.0.0.0/0</destination-prefix><next-hop><next-hop-address>192.0.2.1</next-hop-address></next-hop></route></routes></rib></routing-state></data>')
         self.a._oper=lambda *args:routing
         with self.assertRaises(ApplyBlocked):self.a.prechecks(self.d,self.p)
     def test_validation_fixture_cannot_enter_build(self):

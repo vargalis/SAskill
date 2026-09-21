@@ -20,15 +20,17 @@ from secureaccess.routing import read_routing
 from secureaccess.wizard import WizardState, wizard_step
 from secureaccess.csv_config import configuration_csv_template, import_configuration_csv
 
-HOST = "10.2.3.1"
-USER = "secureaccess-agent"
-SERVICE = "Agent-for-SecureAccess/10.2.3.1"
+HOST = os.environ.get("SECUREACCESS_HOST", "").strip()
+USER = os.environ.get("SECUREACCESS_USER", "").strip()
+SERVICE = "Agent-for-SecureAccess/" + os.environ.get("SECUREACCESS_HOST", "").strip()
 mcp = FastMCP("Agent for SecureAccess", log_level="CRITICAL")
 SERVER_BUILD = os.environ.get('SECUREACCESS_BUILD_ID','unknown')
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 
 
 def session(credentials=None):
+    if not HOST:
+        raise RuntimeError("Configure SECUREACCESS_HOST before connecting")
     username = credentials.get('username') if credentials else USER
     password = credentials.get('password') if credentials else load_password()
     if not username or not password:
@@ -41,6 +43,8 @@ def session(credentials=None):
 @mcp.tool(annotations=READ_ONLY)
 def connection_status() -> dict:
     """Check local password and host-key enrollment only; do not connect or return secrets."""
+    if not HOST:
+        return {"error": "Configure SECUREACCESS_HOST before connecting", "csv_credentials_supported": True}
     try:
         import paramiko
         keys = paramiko.HostKeys()

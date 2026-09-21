@@ -1,9 +1,10 @@
+# Fill placeholders with deployment values before validation.
 # Public configuration only. No password or PSK fields are accepted.
-prefix: SSE
-isp_gateway: 192.0.2.1
-router_wan_ip: 192.0.2.2
+prefix: "<REQUIRED>"
+isp_gateway: "<REQUIRED>"
+router_wan_ip: "<REQUIRED>"
 management_prefixes:
-  - 10.10.10.12/32
+  - "<MANAGEMENT_PREFIX_CIDR>"
 protected_prefixes:
   - 0.0.0.0/0
 crypto:
@@ -11,16 +12,16 @@ crypto:
   prf: sha256
   dh_groups: [19, 20]
   esp: esp-gcm-256
-  ike_lifetime: 86400
+  ike_lifetime: 14400
   ipsec_lifetime: 3600
   dpd_interval: 10
   dpd_retries: 3
 tunnels:
   - tunnel_id: 100
-    headend: 198.51.100.20
-    local_identity: replace-with-tunnel-id@example.sse.cisco.com
-    source_interface: GigabitEthernet0/0/0
-    unnumbered_interface: GigabitEthernet0/0/0
-    mtu: 1400
+    headend: "<REQUIRED>"
+    local_identity: "<REQUIRED>"
+    source_interface: "<REQUIRED>"
+    unnumbered_interface: "<REQUIRED>"
+    mtu: 1390
     tcp_mss: 1350
     distance: 1

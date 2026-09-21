@@ -1,4 +1,5 @@
 """Stateless conversational wizard: caller keeps public state, no network or device writes."""
+import os
 from ipaddress import IPv4Address, IPv4Network
 from typing import Literal
 from pydantic import Field, ValidationError
@@ -179,8 +180,8 @@ def wizard_step(state: WizardState | None = None, answer: dict | None = None, ba
     if current.mode == "new" and current.bootstrap:
         if not current.bootstrap.management_ready or not current.bootstrap.netconf_ready:
             blockers.append("Initial management/NETCONF bootstrap requires local preparation before live discovery")
-    if current.mode != "template" and current.target and str(current.target.host) != "10.2.3.1":
-        blockers.append("Current plugin connection is enrolled only for 10.2.3.1; this target is planning-only")
+    if current.mode != "template" and current.target and str(current.target.host) != os.environ.get("SECUREACCESS_HOST", "").strip():
+        blockers.append("Target must match locally configured SECUREACCESS_HOST; this target is planning-only")
     if current.pbr:
         blockers.append("PBR XML preview implemented; exact device ACL/route-map schema validation, reconciliation and operational qualification remain required")
     response = {"state": public_summary(current), "step": step or "complete", "blockers": blockers,

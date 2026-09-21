@@ -4,12 +4,14 @@ import sys
 import json
 from ipaddress import IPv4Address
 
-SERVICE = "Agent-for-SecureAccess/10.2.3.1"
-USER = "secureaccess-agent"
+SERVICE = "Agent-for-SecureAccess/" + os.environ.get("SECUREACCESS_HOST", "").strip()
+USER = os.environ.get("SECUREACCESS_USER", "").strip()
 PSK_USER_PREFIX = "secureaccess-tunnel-psk"
 
 
 def native_vault():
+    if not os.environ.get("SECUREACCESS_HOST", "").strip():
+        raise RuntimeError("Configure SECUREACCESS_HOST before using the credential store")
     if sys.platform == "win32":
         from keyring.backends.Windows import WinVaultKeyring
         vault = WinVaultKeyring()
@@ -32,6 +34,8 @@ def password():
         return os.environ.get("ISR_PASSWORD")
     if provider != "keyring":
         raise RuntimeError("Unknown secret provider")
+    if not USER:
+        raise RuntimeError("Configure SECUREACCESS_USER before loading stored credentials")
     return native_vault().get_password(SERVICE, USER)
 
 
