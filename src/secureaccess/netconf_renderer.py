@@ -17,7 +17,22 @@ def node(parent, name, value=None, namespace=C):
     return child
 
 
-def render_netconf(spec: ProvisioningSpec) -> dict:
+def _render_psk(peer, record):
+    psk = node(peer, 'pre-shared-key')
+    def value(parent, item):
+        if item['format'] == 'hex':
+            node(parent, 'hex', item['value'])
+        else:
+            node(parent, 'encryption', item['encryption'])
+            node(parent, 'key', item['value'])
+    if record['mode'] == 'shared':
+        value(psk, record['shared'])
+    else:
+        value(node(psk, 'local-option'), record['local'])
+        value(node(psk, 'remote-option'), record['remote'])
+
+
+def render_netconf(spec: ProvisioningSpec, psk_resolver=None) -> dict:
     """Produce an offline merge preview for crypto 2022-07-20/tunnel 2022-03-01.
 
     Includes native interface IP and static routes; device qualification remains required.
@@ -74,6 +89,10 @@ def render_netconf(spec: ProvisioningSpec) -> dict:
         addr = node(node(peer, 'address'), 'ipv4')
         node(addr, 'ipv4-address', t.headend)
         node(addr, 'ipv4-mask', '255.255.255.255')
+        if psk_resolver is not None:
+            secret = psk_resolver(t.tunnel_id, str(t.headend))
+            if secret is not None:
+                _render_psk(peer, secret)
         profile = node(ikev2, 'profile')
         node(profile, 'name', ike_name)
         remote = node(node(node(profile, 'match'), 'identity'), 'remote')
@@ -149,7 +168,7 @@ def render_netconf(spec: ProvisioningSpec) -> dict:
             'schema_revisions': {'Cisco-IOS-XE-crypto': '2022-07-20', 'Cisco-IOS-XE-tunnel': '2022-03-01', 'Cisco-IOS-XE-native': '2022-08-01', 'Cisco-IOS-XE-ip': '2022-07-01'},
             'manual_secret_steps': review['manual_secret_steps'],
             'pbr_schema_provenance': ({
-                'native_and_interfaces': 'Live get-schema from enrolled 10.2.3.1',
+                'native_and_interfaces': 'Live get-schema from qualification device',
                 'acl_reference': 'Cisco bundle xe/17121 Cisco-IOS-XE-acl@2023-07-01',
                 'route_map_reference': 'Cisco bundle xe/17121 Cisco-IOS-XE-route-map@2023-07-01',
                 'advertised_device_revisions': {'Cisco-IOS-XE-acl': '2021-07-01', 'Cisco-IOS-XE-route-map': '2022-07-01'},
@@ -157,7 +176,7 @@ def render_netconf(spec: ProvisioningSpec) -> dict:
             'blockers': (['Exact device ACL/route-map schemas and deviations must be checked against reference mapping; PBR is not lab-qualified'] if spec.pbr else []) + ['Device deviations and complete imported YANG schema set not validated',
                          'No running-config reconciliation, full YANG validation or live post-checks',
                          'Candidate and confirmed commit unavailable in supplied router inventory',
-                         'New keyring peers require manual PSK provisioning'],
+                         'Apply requires a PSK from the test CSV, native vault, or an existing matching peer'],
             'warning': 'Offline preview only; never send directly to a router. Merge alone does not reconcile conflicting choices or algorithms.'}
 
 

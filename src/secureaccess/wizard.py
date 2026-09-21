@@ -1,4 +1,5 @@
 """Stateless conversational wizard: caller keeps public state, no network or device writes."""
+import os
 from ipaddress import IPv4Address, IPv4Network
 from typing import Literal
 from pydantic import Field, ValidationError
@@ -74,21 +75,21 @@ class WizardState(StrictModel):
 
 
 STEPS = {
-    "mode": {"question": "Что будем делать?", "choices": [
-        {"value": "update", "label": "Изменить существующую конфигурацию"},
-        {"value": "new", "label": "Настроить новый маршрутизатор"},
-        {"value": "template", "label": "Создать шаблон"}]},
-    "target": {"question": "Как назовём маршрутизатор или шаблон? Для маршрутизатора укажи также IP управления.", "fields": ["name", "host"]},
-    "baseline": {"question": "Что именно меняем и есть ли безопасная сводка текущей конфигурации?", "fields": ["available", "change_scope"]},
-    "bootstrap": {"question": "Доступ к управлению и NETCONF уже подготовлен?", "fields": ["management_ready", "netconf_ready"]},
-    "routing": {"question": "Просмотрим таблицу маршрутизации, default route, адреса/маски интерфейсов и занятые туннели. Подтверди просмотр; укажи туннели, которые сохраняем.", "read_tool": "routing_summary", "fields": ["reviewed", "occupied_tunnel_ids", "preserve_tunnel_ids", "operational_table_verified"]},
-    "tunnel_numbers": {"question": "Выбери интерфейс TunnelN и действие create (создать новый) или reuse (использовать существующий). Для reuse текущие параметры и план изменений подтверждаются отдельно; это не применение.", "fields": ["interface_name", "action"], "answer_format": {"tunnel_numbers": [{"interface_name": "TunnelN", "action": "create OR reuse"}]}},
-    "network": {"question": "Выбери routing_mode: static (маршруты назначения) или pbr (выбор источников). Укажи шлюз ISP, IPv4-адрес WAN-интерфейса, сети управления и сети назначения Secure Access. В static сети управления идут через ISP; в pbr их текущие маршруты сохраняются.", "fields": ["routing_mode", "isp_gateway", "router_wan_ip", "management_prefixes", "protected_prefixes", "prefix"]},
-    "pbr": {"question": "Укажи сети источников, входные интерфейсы и исключения по назначению (управление и локальные сети). Туннели используются в выбранном порядке: primary, затем secondary; если оба недоступны, normal-routing возвращает трафик в обычную RIB/ISP.", "fields": ["source_prefixes", "ingress_interfaces", "bypass_destination_prefixes", "failure_behavior"], "supported_failure_behavior": ["normal-routing"], "warning": "Поддерживается один VTI или упорядоченная пара primary/secondary; существующий default route сохраняется"},
-    "tunnels": {"question": "Укажи параметры туннелей: headend, local IKE identity, source interface, адрес VTI или unnumbered interface. PSK не присылай.", "fields": ["tunnel_id", "headend", "local_identity", "source_interface", "address OR unnumbered_interface", "distance"]},
-    "tunnel_reuse_review": {"question": "Проверь текущие параметры выбранных существующих TunnelN и предлагаемые параметры. Укажи границы изменения и подтверди использование этих интерфейсов. Подтверждение снимает ранее выбранное сохранение только этих туннелей; устройство не изменяется.", "fields": ["confirmed", "change_scope", "current_interfaces"], "warning": "Нужна безопасная сводка текущих параметров; секреты и raw XML не принимаются"},
-    "crypto": {"question": "Подтверди crypto-параметры из настройки Secure Access: IKE encryption/PRF/DH, ESP, lifetime/DPD и PFS при необходимости.", "fields": ["ike_encryption", "prf", "dh_groups", "esp", "ike_lifetime", "ipsec_lifetime", "dpd_interval", "dpd_retries", "pfs"]},
-    "review": {"question": "Проверь собранные параметры. Подтвердить создание плана/шаблона? Это не разрешение на применение.", "choices": [{"value": "confirmed", "label": "Создать план или шаблон"}]},
+    "mode": {"question": "What would you like to do?", "choices": [
+        {"value": "update", "label": "Modify an existing configuration"},
+        {"value": "new", "label": "Configure a new router"},
+        {"value": "template", "label": "Create a template"}]},
+    "target": {"question": "Enter the router or template name. For a router, also enter its management IP address.", "fields": ["name", "host"]},
+    "baseline": {"question": "Describe the exact change scope and confirm whether a sanitized current-configuration summary is available.", "fields": ["available", "change_scope"]},
+    "bootstrap": {"question": "Are management access and NETCONF ready and verified?", "fields": ["management_ready", "netconf_ready"]},
+    "routing": {"question": "Review the routing table, default route, interface addresses and masks, and occupied tunnel IDs. Confirm the review and identify tunnels to preserve.", "read_tool": "routing_summary", "fields": ["reviewed", "occupied_tunnel_ids", "preserve_tunnel_ids", "operational_table_verified"]},
+    "tunnel_numbers": {"question": "Select each TunnelN interface and choose create or reuse. Reuse requires a separate review of current parameters and proposed changes.", "fields": ["interface_name", "action"], "answer_format": {"tunnel_numbers": [{"interface_name": "TunnelN", "action": "create OR reuse"}]}},
+    "network": {"question": "Choose routing_mode: static for destination routes or pbr for source-based steering. Enter the verified ISP gateway, router WAN IPv4 address, management prefixes, Secure Access destinations, and object prefix.", "fields": ["routing_mode", "isp_gateway", "router_wan_ip", "management_prefixes", "protected_prefixes", "prefix"]},
+    "pbr": {"question": "Enter source prefixes, LAN ingress interfaces, and destination bypass prefixes. Cisco applies the route-map to the interface where the traffic enters the router.", "fields": ["source_prefixes", "ingress_interfaces", "bypass_destination_prefixes", "failure_behavior"], "supported_failure_behavior": ["normal-routing"], "warning": "The existing default route is preserved. Verify normal RIB/ISP fallback when the selected VTI is unavailable."},
+    "tunnels": {"question": "Enter the headend, portal Tunnel ID/email as the local IKE identity, WAN source interface, and either a numbered VTI address or an unnumbered interface. Never enter a PSK.", "fields": ["tunnel_id", "headend", "local_identity", "source_interface", "address OR unnumbered_interface", "distance"]},
+    "tunnel_reuse_review": {"question": "Compare the current and proposed parameters for every selected existing TunnelN, enter the exact change scope, and confirm reuse.", "fields": ["confirmed", "change_scope", "current_interfaces"], "warning": "A sanitized current-parameter summary is required; secrets and raw XML are not accepted."},
+    "crypto": {"question": "Confirm the Secure Access crypto parameters. Cisco recommends AES-256-GCM, SHA256 PRF, DH groups 19 and 20, a 14400-second IKE lifetime, a 3600-second Child SA lifetime, MTU 1390, and MSS 1350. Leave PFS disabled unless it is required and tested.", "fields": ["ike_encryption", "prf", "dh_groups", "esp", "ike_lifetime", "ipsec_lifetime", "dpd_interval", "dpd_retries", "pfs"]},
+    "review": {"question": "Review the collected values. Confirm creation of the plan or template; this does not authorize a device change.", "choices": [{"value": "confirmed", "label": "Create the plan or template"}]},
 }
 
 
@@ -179,8 +180,8 @@ def wizard_step(state: WizardState | None = None, answer: dict | None = None, ba
     if current.mode == "new" and current.bootstrap:
         if not current.bootstrap.management_ready or not current.bootstrap.netconf_ready:
             blockers.append("Initial management/NETCONF bootstrap requires local preparation before live discovery")
-    if current.mode != "template" and current.target and str(current.target.host) != "10.2.3.1":
-        blockers.append("Current plugin connection is enrolled only for 10.2.3.1; this target is planning-only")
+    if current.mode != "template" and current.target and str(current.target.host) != os.environ.get("SECUREACCESS_HOST", "").strip():
+        blockers.append("Target must match locally configured SECUREACCESS_HOST; this target is planning-only")
     if current.pbr:
         blockers.append("PBR XML preview implemented; exact device ACL/route-map schema validation, reconciliation and operational qualification remain required")
     response = {"state": public_summary(current), "step": step or "complete", "blockers": blockers,
@@ -190,7 +191,7 @@ def wizard_step(state: WizardState | None = None, answer: dict | None = None, ba
         response["prompt"] = STEPS[step]
         if step == "bootstrap" and current.bootstrap:
             response["prompt"] = {
-                "question": "Сначала подготовим доступ. Есть ли рабочая консольная или администраторская SSH-сессия маршрутизатора?",
+                "question": "Prepare access first. Is there a working console or administrator SSH session to the router?",
                 "missing": [name for name, ready in current.bootstrap.model_dump().items() if not ready],
                 "next_action": "Guide local bootstrap before collecting ISP/routes. Re-submit bootstrap readiness after verification.",
                 "fields": ["management_ready", "netconf_ready"],

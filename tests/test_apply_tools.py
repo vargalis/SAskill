@@ -26,7 +26,7 @@ class ToolTests(unittest.TestCase):
     def test_foreign_csv_target_never_connects(self):
         rows=filled()
         for row in rows:
-            if row['section']=='device' and row['field']=='host':row['value']='10.2.3.99'
+            if row['section']=='device' and row['field']=='host':row['value']='198.51.100.99'
         for name in ('validate_configuration_csv','prepare_configuration_apply'):
             result=self.invoke_without_connection(name,encode(rows));self.assertIn('target',result['error'])
     def test_unapproved_window_never_connects(self):
@@ -35,4 +35,21 @@ class ToolTests(unittest.TestCase):
     def test_missing_plan_not_consumed_no_connection(self):
         result=self.invoke_without_connection('apply_configuration_plan','missing','wrong',True)
         self.assertFalse(result['applied']);self.assertFalse(result['plan_consumed'])
+    def test_unconfigured_target_never_connects(self):
+        from unittest.mock import patch
+        fn=self.tools['session']
+        with patch.dict(fn.__globals__, {'HOST': ''}), patch.object(fn.__globals__['manager'], 'connect') as connect:
+            with self.assertRaisesRegex(RuntimeError, 'SECUREACCESS_HOST'):
+                fn({'username': 'test-user', 'password': 'dummy'})
+            connect.assert_not_called()
+
+    def test_explicit_target_and_csv_credentials(self):
+        from unittest.mock import patch
+        fn=self.tools['session']
+        with patch.dict(fn.__globals__, {'HOST': '198.51.100.10'}), patch.object(fn.__globals__['manager'], 'connect') as connect:
+            fn({'username': 'test-user', 'password': 'dummy'})
+            self.assertEqual(connect.call_args.kwargs['host'], '198.51.100.10')
+            self.assertEqual(connect.call_args.kwargs['username'], 'test-user')
+            self.assertTrue(connect.call_args.kwargs['hostkey_verify'])
+
 if __name__=='__main__':unittest.main()

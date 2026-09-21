@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from ncclient import manager
-from local_secrets import password as load_password
+from local_secrets import password as load_password, tunnel_psk as load_tunnel_psk
 from secureaccess.discovery import discover, read_native, parse_xml
 from secureaccess.provisioning import ProvisioningSpec, render_nonsecret
 from secureaccess.netconf_renderer import render_netconf
@@ -20,19 +20,22 @@ from secureaccess.routing import read_routing
 from secureaccess.wizard import WizardState, wizard_step
 from secureaccess.csv_config import configuration_csv_template, import_configuration_csv
 
-HOST = "10.2.3.1"
-USER = "secureaccess-agent"
-SERVICE = "Agent-for-SecureAccess/10.2.3.1"
+HOST = os.environ.get("SECUREACCESS_HOST", "").strip()
+USER = os.environ.get("SECUREACCESS_USER", "").strip()
+SERVICE = "Agent-for-SecureAccess/" + os.environ.get("SECUREACCESS_HOST", "").strip()
 mcp = FastMCP("Agent for SecureAccess", log_level="CRITICAL")
 SERVER_BUILD = os.environ.get('SECUREACCESS_BUILD_ID','unknown')
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 
 
-def session():
-    password = load_password()
-    if not password:
+def session(credentials=None):
+    if not HOST:
+        raise RuntimeError("Configure SECUREACCESS_HOST before connecting")
+    username = credentials.get('username') if credentials else USER
+    password = credentials.get('password') if credentials else load_password()
+    if not username or not password:
         raise RuntimeError("credential-missing")
-    return manager.connect(host=HOST, port=830, username=USER, password=password,
+    return manager.connect(host=HOST, port=830, username=username, password=password,
                            hostkey_verify=True, allow_agent=False, look_for_keys=False,
                            timeout=30, device_params={"name": "iosxe"})
 
@@ -40,6 +43,8 @@ def session():
 @mcp.tool(annotations=READ_ONLY)
 def connection_status() -> dict:
     """Check local password and host-key enrollment only; do not connect or return secrets."""
+    if not HOST:
+        return {"error": "Configure SECUREACCESS_HOST before connecting", "csv_credentials_supported": True}
     try:
         import paramiko
         keys = paramiko.HostKeys()
@@ -48,10 +53,11 @@ def connection_status() -> dict:
             keys.load(str(path))
         return {"host": HOST, "port": 830, "username": USER,
                 "credential_present": bool(load_password()),
+                "csv_credentials_supported": True,
                 "host_key_enrolled": bool(keys.lookup(f"[{HOST}]:830") or keys.lookup(HOST)),
                 "mode": "read-and-transactional-apply", "apply_mechanism_implemented": True, "apply_available": None}
     except Exception:
-        return {"error": "Local credential/key check failed; check native secret store or explicit environment provider"}
+        return {"error": "Native credential/key check failed", "csv_credentials_supported": True}
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -75,7 +81,7 @@ def secureaccess_wizard(state: WizardState | None = None, answer: dict | None = 
 
 @mcp.tool(annotations=READ_ONLY)
 def generate_secureaccess_configuration(spec: ProvisioningSpec) -> dict:
-    """Generate the full IKEv2/IPsec/keyring/VTI/static-route review configuration. No password or PSK fields; no device writes."""
+    """Generate a redacted IKEv2/IPsec/keyring/VTI/static-route review configuration. No device writes."""
     return render_nonsecret(spec)
 
 
@@ -135,18 +141,36 @@ def configuration_summary() -> dict:
 
 
 @mcp.tool(annotations=READ_ONLY)
-def create_configuration_csv(platform: str = "iosxe", name: str = "", host: str = "") -> dict:
-    """Create a public CSV template to fill locally. FTD is future planning only. No device I/O."""
+def create_configuration_csv(mode: str, platform: str = "iosxe", name: str = "", host: str = "") -> dict:
+    """Create a basic or advanced public CSV template. Ask the user to choose the mode first. No device I/O."""
     try:
-        return configuration_csv_template(platform, name, host)
+        return configuration_csv_template(platform, name, host, mode)
     except ValueError:
-        return {"error": "Unsupported template platform", "apply_available": False}
+        return {"error": "Unsupported template platform or mode", "apply_available": False}
 
 
 @mcp.tool(annotations=READ_ONLY)
 def preview_configuration_csv(csv_text: str, occupied_tunnel_ids: list[int] | None = None) -> dict:
     """Validate public CSV and produce configuration previews. Never applies values to a device; no secrets accepted."""
     return import_configuration_csv(csv_text, occupied_tunnel_ids)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def tunnel_psk_status(csv_text: str) -> dict:
+    """Report whether each CSV tunnel has a matching native-vault PSK. Never returns key values."""
+    parsed=import_configuration_csv(csv_text)
+    if not parsed.get('valid') or parsed.get('platform')!='iosxe':
+        return {'valid':False,'error':'Incomplete or invalid IOS XE CSV','secrets_included':False}
+    result=[]
+    for tunnel in parsed['provisioning_spec']['tunnels']:
+        try:
+            record=load_tunnel_psk(tunnel['tunnel_id'],tunnel['headend'])
+            result.append({'interface':f"Tunnel{tunnel['tunnel_id']}",'headend':tunnel['headend'],
+                           'present':record is not None,'mode':record.get('mode') if record else None})
+        except Exception:
+            result.append({'interface':f"Tunnel{tunnel['tunnel_id']}",'headend':tunnel['headend'],
+                           'present':False,'error':'Stored PSK record is unavailable or invalid'})
+    return {'valid':True,'tunnels':result,'secrets_included':False}
 
 
 
@@ -157,25 +181,26 @@ APPLY_PLANS = PlanStore()
 MUTATION = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=True)
 
 @mcp.tool(annotations=READ_ONLY)
-def prepare_configuration_apply(csv_text: str) -> dict:
-    """Read device state and prepare a private one-use plan with public diff. No writes. Requires a qualified adapter and candidate/confirmed-commit."""
-    preliminary=import_configuration_csv(csv_text)
+def prepare_configuration_apply(csv_text: str, transaction_mode: str = "auto") -> dict:
+    """Prepare an exact private plan. Auto uses candidate when available, otherwise guarded lab running mode. No writes."""
+    preliminary=import_configuration_csv(csv_text,include_test_secrets=True)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
         return {'apply_ready':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
     if preliminary['target']['host']!=HOST:
         return {'apply_ready':False,'device_written':False,'error':'CSV target differs from enrolled router'}
     try:
-        with session() as device:
+        with session(preliminary.get('_test_credentials')) as device:
             routes = read_routing(device)
-            parsed = import_configuration_csv(csv_text, routes.get('occupied_tunnel_ids'))
+            parsed = import_configuration_csv(csv_text, routes.get('occupied_tunnel_ids'), include_test_secrets=True)
             if not parsed.get('valid') or parsed.get('platform') != 'iosxe':
                 return {'apply_ready':False,'error':'Incomplete or invalid IOS XE CSV; use preview_configuration_csv'}
             if parsed['target']['host'] != HOST:
                 return {'apply_ready':False,'error':'CSV target differs from enrolled router'}
             spec = ProvisioningSpec.model_validate(parsed['provisioning_spec'])
             adapter = select_transaction_adapter(device,parsed)
+            adapter.secret_resolver=load_tunnel_psk
             try:
-                return prepare(device,adapter,parsed,HOST,APPLY_PLANS)
+                return prepare(device,adapter,parsed,HOST,APPLY_PLANS,transaction_mode=transaction_mode)
             finally:
                 adapter.release(device)
     except ApplyBlocked as error:
@@ -186,7 +211,7 @@ def prepare_configuration_apply(csv_text: str) -> dict:
 @mcp.tool(annotations=MUTATION)
 def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_window: bool,
                              confirm_timeout: int = 180, postcheck_budget: int = 60) -> dict:
-    """Apply only after the user approves this exact prepared diff/digest and an exclusive change window. One-use; never auto-retry an uncertain commit. No raw XML/PSK input."""
+    """Apply only after approval of the exact diff/digest and an exclusive window. PSKs may originate in the prepared test CSV but are never returned."""
     if exclusive_window is not True:
         return {'applied':False,'error':'Exclusive configuration window must be confirmed'}
     if not (30 <= postcheck_budget <= 300 and postcheck_budget+60 <= confirm_timeout <= 600):
@@ -199,12 +224,14 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
         consumed = True
         if plan.target != HOST:
             raise ApplyBlocked('Plan target differs from enrolled router')
-        device = session()
-        require_capabilities(device)
+        credentials=plan.spec.get('_test_credentials') if isinstance(plan.spec,dict) else None
+        device = session(credentials)
         adapter = select_transaction_adapter(device,plan.spec)
+        adapter.secret_resolver=load_tunnel_psk
         execution_started = True
         return apply(device,adapter,plan,exclusive_window=exclusive_window,
-                     confirm_timeout=confirm_timeout,postcheck_budget=postcheck_budget,reconnect=session)
+                     confirm_timeout=confirm_timeout,postcheck_budget=postcheck_budget,
+                     reconnect=lambda:session(credentials))
     except ApplyBlocked as error:
         return {'applied':False,'error':str(error),'plan_consumed':consumed}
     except Exception:
@@ -218,22 +245,23 @@ def apply_configuration_plan(plan_id: str, approval_digest: str, exclusive_windo
 
 @mcp.tool(annotations=READ_ONLY)
 def validate_configuration_csv(csv_text: str) -> dict:
-    """Validate the reconciled CSV on the enrolled router with NETCONF edit-config test-only. The RPC applies no configuration and works without candidate. Returns a public diff, never credentials/PSK."""
+    """Validate the reconciled CSV, including an optional test PSK, with NETCONF test-only. Returns only a redacted public diff."""
     device=None;adapter=None
-    preliminary=import_configuration_csv(csv_text)
+    preliminary=import_configuration_csv(csv_text,include_test_secrets=True)
     if not preliminary.get('valid') or preliminary.get('platform')!='iosxe':
         return {'validated':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
     if preliminary['target']['host']!=HOST:
         return {'validated':False,'device_written':False,'error':'CSV target differs from enrolled router'}
     try:
-        device=session()
+        device=session(preliminary.get('_test_credentials'))
         routes=read_routing(device)
-        parsed=import_configuration_csv(csv_text,routes.get('occupied_tunnel_ids'))
+        parsed=import_configuration_csv(csv_text,routes.get('occupied_tunnel_ids'),include_test_secrets=True)
         if not parsed.get('valid') or parsed.get('platform')!='iosxe':
             return {'validated':False,'device_written':False,'error':'Incomplete or invalid IOS XE CSV; preview CSV first'}
         if parsed['target']['host']!=HOST:
             return {'validated':False,'device_written':False,'error':'CSV target differs from enrolled router'}
         adapter=select_transaction_adapter(device,parsed)
+        adapter.secret_resolver=load_tunnel_psk
         return {'validated':True,**adapter.validate_intent(device,parsed)}
     except ApplyBlocked as error:
         return {'validated':False,'device_written':False,'error':str(error)}

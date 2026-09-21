@@ -1,0 +1,69 @@
+section;item;field;value;required;description
+meta;1;schema_version;2;yes;Keep 2. This identifies the CSV schema and must not be edited.
+meta;1;platform;iosxe;yes;Enter iosxe or ftd. Use iosxe for Cisco ISR-G2, ISR4K, or CSR routers.
+meta;1;template_mode;advanced;no;Template presentation mode: basic or advanced. Basic omits parameters that have built-in recommended defaults.
+device;1;name;example-branch-r1;yes;FICTIONAL EXAMPLE ONLY. All addresses, identities and passwords are invented. Replace deployment values before use.
+device;1;host;192.0.2.10;yes;Enter the NETCONF management IPv4 address. Do not enter the WAN address.
+network;1;existing_objects_action;;no;Leave blank to reject name conflicts. Use replace_named only after reviewing an exact diff of the named objects.
+network;1;routing_mode;pbr;yes;Enter static or pbr. Recommendation: use pbr when selected source LANs must reach 0.0.0.0/0 through Secure Access.
+network;1;isp_gateway;198.51.100.1;yes;Enter the current ISP next-hop IPv4 address. Recommendation: copy it from the verified active default route.
+network;1;router_wan_ip;198.51.100.2;yes;Enter the router WAN IPv4 address used by the IKEv2 policy local-address match. It can be private when the ISR is behind NAT.
+network;1;prefix;example-sse;yes;"IOS XE object-name prefix. Recommended value: sse; use another short unique prefix only when required."
+crypto;1;ike_encryption;aes-gcm-256;yes;"IKEv2 encryption. Cisco recommends GCM for maximum throughput; recommended value: aes-gcm-256."
+crypto;1;prf;sha256;yes;IKEv2 pseudo-random function. SHA256 is required with the recommended AES-GCM proposal.
+crypto;1;integrity;;no;"IKEv2 integrity algorithm. Leave blank with AES-GCM because GCM provides authenticated encryption; use the portal-approved hash with CBC."
+crypto;1;dh_groups;19|20;yes;"IKEv2 Diffie-Hellman groups separated by |. Recommended ISR proposal: 19|20; Secure Access also supports 14 and 15."
+crypto;1;esp;esp-gcm-256;yes;"IPsec ESP transform. Cisco recommends GCM for throughput; recommended value: esp-gcm-256."
+crypto;1;pfs;;no;"Optional IPsec PFS group. Recommendation: leave blank unless required and tested; Cisco warns PFS preference can cause rekey failures."
+crypto;1;ike_lifetime;14400;yes;IKE rekey interval in seconds. Recommended Secure Access default: 14400 seconds (4 hours).
+crypto;1;ipsec_lifetime;3600;yes;Child SA/IPsec rekey interval in seconds. Recommended Secure Access default: 3600 seconds (1 hour).
+crypto;1;dpd_interval;10;yes;"DPD interval in seconds. The Cisco ISR example uses 10 seconds; use 30 seconds when intentionally matching the Secure Access 156-second maximum timeout design."
+crypto;1;dpd_retries;3;yes;"DPD retry value used by the ISR profile. Recommended ISR guide value: 3; verify the resulting failover timing in production testing."
+connection;1;username;example-netconf;yes;Test build only. Enter the NETCONF username.
+connection;1;password;ExampleOnly-Netconf-2026!;yes;Test build only. Enter the NETCONF password. It is redacted from all generated output.
+management_prefix;1;value;192.0.2.0/24;yes;Enter a management network in CIDR notation, for example 198.51.100.0/24. Recommendation: bypass it from PBR to preserve router access.
+destination_prefix;1;value;0.0.0.0/0;yes;Enter a Secure Access destination in CIDR notation. Use 0.0.0.0/0 to steer all destinations selected by the PBR source ACL.
+source_prefix;1;value;10.200.10.0/24;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+bypass_prefix;1;value;192.0.2.0/24;no;Optional. Enter a destination that must use normal routing. Leave every bypass row blank to generate only source-to-destination permit entries.
+ingress_interface;1;value;GigabitEthernet0/0/1;yes;Enter the IOS XE LAN interface where matching traffic arrives, for example GigabitEthernet0/0/1. Cisco requires the route-map on the ingress interface.
+pbr;1;failure_behavior;normal-routing;yes;"Enter normal-routing. This returns traffic to the normal RIB/ISP when no PBR set action is usable; verify this behavior during failover testing."
+tunnel;1;interface_name;Tunnel200;yes;Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.
+tunnel;1;action;create;yes;Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.
+tunnel;1;headend;203.0.113.10;yes;Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.
+tunnel;1;local_identity;branch-primary@example.com;yes;Enter the Tunnel ID/email from the Secure Access portal.
+tunnel;1;psk_mode;shared;yes;Test build only. Enter shared for one bidirectional PSK or split for separate local and remote PSKs.
+tunnel;1;psk_format;plain;yes;Test build only. Enter plain, type6, or hex. Split mode applies the selected format to both keys.
+tunnel;1;shared_psk;ExampleOnly-Shared-PSK-2026!;no;Test build only. Enter the tunnel passphrase when psk_mode=shared.
+tunnel;1;local_psk;;no;Test build only. Enter the local signing key when psk_mode=split.
+tunnel;1;remote_psk;;no;Test build only. Enter the remote verification key when psk_mode=split.
+tunnel;1;source_interface;GigabitEthernet0/0/0;yes;Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.
+tunnel;1;address;;no;Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.
+tunnel;1;unnumbered_interface;GigabitEthernet0/0/0;no;"Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address."
+tunnel;1;source_loopback_address;;no;"Enter a CIDR address only when the plan must create a new loopback used as the tunnel source; otherwise leave blank."
+tunnel;1;mtu;1390;yes;"Tunnel inner IP MTU in bytes. Cisco Secure Access requires no more than 1390; recommended value: 1390. Do not reduce physical-interface MTU."
+tunnel;1;tcp_mss;1350;yes;TCP MSS clamp in bytes. Recommended value: 1350 to match Cisco Secure Access and avoid fragmentation.
+tunnel;1;distance;1;yes;"Static-route administrative distance from 1 to 254. Recommended primary value: 1; use a larger value only for an intentionally floating backup."
+tunnel;1;reuse_confirmed;;no;For action=reuse, enter true only after reviewing the current interface and the exact proposed changes.
+tunnel;1;change_scope;;no;"For action=reuse, describe the exact approved fields that may change; leave blank for action=create."
+source_prefix;2;value;10.200.20.0/24;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+source_prefix;3;value;10.200.30.0/24;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+source_prefix;4;value;10.200.40.0/24;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+source_prefix;5;value;10.200.50.0/24;yes;"Enter one PBR source LAN in CIDR notation; copy this row with a unique item number for each LAN. Include only networks intended for Secure Access."
+tunnel;2;interface_name;Tunnel201;yes;Enter TunnelN, for example Tunnel2. Recommendation: choose an unused ID from the fresh router inventory.
+tunnel;2;action;create;yes;Enter create for an unused interface or reuse for an existing interface. Reuse requires a reviewed current-versus-proposed diff.
+tunnel;2;headend;203.0.113.11;yes;Enter the Secure Access data-center IPv4 address shown in the tunnel group. Recommendation: use the closest assigned data center.
+tunnel;2;local_identity;branch-backup@example.com;yes;Enter the Tunnel ID/email from the Secure Access portal.
+tunnel;2;psk_mode;shared;yes;Test build only. Enter shared for one bidirectional PSK or split for separate local and remote PSKs.
+tunnel;2;psk_format;plain;yes;Test build only. Enter plain, type6, or hex. Split mode applies the selected format to both keys.
+tunnel;2;shared_psk;ExampleOnly-Shared-PSK-2026!;no;Test build only. Enter the tunnel passphrase when psk_mode=shared.
+tunnel;2;local_psk;;no;Test build only. Enter the local signing key when psk_mode=split.
+tunnel;2;remote_psk;;no;Test build only. Enter the remote verification key when psk_mode=split.
+tunnel;2;source_interface;GigabitEthernet0/0/0;yes;Enter the WAN interface that reaches the headend, for example GigabitEthernet0/0/0. Verify the underlay route first.
+tunnel;2;address;;no;Enter the VTI IPv4 address with prefix length only when numbered, for example 169.254.10.1/30. Otherwise use unnumbered_interface.
+tunnel;2;unnumbered_interface;GigabitEthernet0/0/0;no;"Enter an existing interface whose IPv4 address the VTI will borrow. Cisco ISR examples use ip unnumbered; use either this field or address."
+tunnel;2;source_loopback_address;;no;"Enter a CIDR address only when the plan must create a new loopback used as the tunnel source; otherwise leave blank."
+tunnel;2;mtu;1390;yes;"Tunnel inner IP MTU in bytes. Cisco Secure Access requires no more than 1390; recommended value: 1390. Do not reduce physical-interface MTU."
+tunnel;2;tcp_mss;1350;yes;TCP MSS clamp in bytes. Recommended value: 1350 to match Cisco Secure Access and avoid fragmentation.
+tunnel;2;distance;10;yes;"Static-route administrative distance from 1 to 254. Recommended primary value: 1; use a larger value only for an intentionally floating backup."
+tunnel;2;reuse_confirmed;;no;For action=reuse, enter true only after reviewing the current interface and the exact proposed changes.
+tunnel;2;change_scope;;no;"For action=reuse, describe the exact approved fields that may change; leave blank for action=create."

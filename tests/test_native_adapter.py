@@ -4,17 +4,17 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'backend'))
 from copy import deepcopy
 from types import SimpleNamespace
 from hashlib import sha256
-from secureaccess.native_adapter import IOSXENativeAdapter,digest,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,NC
+from secureaccess.native_adapter import IOSXENativeAdapter,digest,digest_nonsecret_acl_order,config,psk_present,parse_routes,route_to,crypto_up,interface_up,IO,CO,RO,N,C,T,A,R,NC
 from secureaccess.discovery import parse_xml
 from secureaccess.workflow import ApplyBlocked
 from test_csv_config import filled,encode
 from secureaccess.csv_config import import_configuration_csv
 
 BASE=f'''<data xmlns="{NC}"><native xmlns="{N}">
-<hostname>test</hostname><interface><GigabitEthernet><name>0/0/0</name><ip><address><primary><address>192.168.2.110</address><mask>255.255.255.0</mask></primary></address></ip></GigabitEthernet>
+<hostname>test</hostname><interface><GigabitEthernet><name>0/0/0</name><ip><address><primary><address>192.0.2.110</address><mask>255.255.255.0</mask></primary></address></ip></GigabitEthernet>
 <GigabitEthernet><name>0/0/1</name></GigabitEthernet><Tunnel><name>1</name><shutdown/><description>untouched</description></Tunnel></interface>
-<ip><route><ip-route-interface-forwarding-list><prefix>0.0.0.0</prefix><mask>0.0.0.0</mask><fwd-list><fwd>192.168.2.1</fwd></fwd-list></ip-route-interface-forwarding-list>
-<ip-route-interface-forwarding-list><prefix>10.10.10.0</prefix><mask>255.255.255.0</mask><fwd-list><fwd>10.2.3.2</fwd></fwd-list></ip-route-interface-forwarding-list></route></ip>
+<ip><route><ip-route-interface-forwarding-list><prefix>0.0.0.0</prefix><mask>0.0.0.0</mask><fwd-list><fwd>192.0.2.1</fwd></fwd-list></ip-route-interface-forwarding-list>
+<ip-route-interface-forwarding-list><prefix>10.77.10.0</prefix><mask>255.255.255.0</mask><fwd-list><fwd>198.51.100.2</fwd></fwd-list></ip-route-interface-forwarding-list></route></ip>
 <crypto><ikev2 xmlns="{C}"><keyring><name>SSE-KEYRING-100</name><peer><name>SSE-PEER-100</name><address><ipv4><ipv4-address>203.0.113.20</ipv4-address><ipv4-mask>255.255.255.255</ipv4-mask></ipv4></address><pre-shared-key><key>FIXTURE-SECRET-NEVER-OUTPUT</key></pre-shared-key></peer>
 <peer><name>unrelated</name><pre-shared-key><key>OTHER-SECRET</key></pre-shared-key></peer></keyring></ikev2></crypto></native></data>'''
 def intent():
@@ -35,7 +35,7 @@ class Device:
 class NativeTests(unittest.TestCase):
     def setUp(self): self.a=IOSXENativeAdapter(schemas={});self.d=Device();self.p=intent()
     def test_pbr_preserves_default_management_other_tunnel_and_secrets(self):
-        expected,payload,diff=self.a._reconcile(self.d.running,self.p)
+        expected,payload,rollback,diff=self.a._reconcile(self.d.running,self.p)
         for path in [f'{{{N}}}native/{{{N}}}ip/{{{N}}}route',f'{{{N}}}native/{{{N}}}interface/{{{N}}}Tunnel']:
             old=self.d.running.find(path);new=expected.find(path)
             if path.endswith('Tunnel'):self.assertEqual(digest(old),digest(new))
@@ -54,7 +54,7 @@ class NativeTests(unittest.TestCase):
         from lxml import etree
         ike.append(parse_xml(f'<proposal xmlns="{C}"><name>SSE-PROPOSAL</name><encryption><aes-cbc-128/></encryption></proposal>'))
         with self.assertRaises(ApplyBlocked):self.a._reconcile(self.d.running,self.p)
-        self.p['existing_objects_action']='replace_named';expected,_,diff=self.a._reconcile(self.d.running,self.p)
+        self.p['existing_objects_action']='replace_named';expected,_,_,diff=self.a._reconcile(self.d.running,self.p)
         self.assertFalse(expected.findall(f'.//{{{C}}}aes-cbc-128'))
         self.assertTrue(any(x['object']=='proposal' and x['action']=='replace' for x in diff))
     def test_reuse_chosen_tunnel_preserves_description_and_peer_psk(self):
@@ -63,7 +63,7 @@ class NativeTests(unittest.TestCase):
             if r['section']=='tunnel':
                 values={'interface_name':'Tunnel1','action':'reuse','reuse_confirmed':'true','change_scope':'replace VPN parameters'}
                 if r['field'] in values:r['value']=values[r['field']]
-        p=import_configuration_csv(encode(rows),[1]);expected,_,diff=self.a._reconcile(self.d.running,p)
+        p=import_configuration_csv(encode(rows),[1]);expected,_,_,diff=self.a._reconcile(self.d.running,p)
         selected=expected.find(f'{{{N}}}native/{{{N}}}interface/{{{N}}}Tunnel')
         self.assertEqual(selected.findtext(f'{{{N}}}description'),'untouched');self.assertIsNone(selected.find(f'{{{N}}}shutdown'))
         self.assertFalse(any(x['object']=='tunnel' and x['identity']!="('1',)" for x in diff))
@@ -96,8 +96,32 @@ class NativeTests(unittest.TestCase):
     def test_psk_local_remote_both_required(self):
         peer=parse_xml(f'<peer xmlns="{C}"><pre-shared-key><local-option><key>x</key></local-option></pre-shared-key></peer>')
         self.assertFalse(psk_present(peer))
+    def test_vault_psk_variants_are_injected_only_into_private_payload(self):
+        variants=[
+            {'mode':'shared','shared':{'format':'key','encryption':0,'value':'plain-secret'}},
+            {'mode':'shared','shared':{'format':'key','encryption':6,'value':'type6-secret'}},
+            {'mode':'shared','shared':{'format':'hex','value':'A1B2'}},
+            {'mode':'split','local':{'format':'key','encryption':0,'value':'local-secret'},
+             'remote':{'format':'hex','value':'C3D4'}},
+        ]
+        for record in variants:
+            adapter=IOSXENativeAdapter(schemas={},secret_resolver=lambda *_args,record=record:record)
+            selected=deepcopy(self.p);selected['existing_objects_action']='replace_named'
+            _,payload,rollback,diff=adapter._reconcile(self.d.running,selected)
+            wire=__import__('lxml').etree.tostring(payload,encoding='unicode')
+            self.assertTrue(psk_present(payload.find(f'.//{{{C}}}peer')))
+            for secret in ('plain-secret','type6-secret','local-secret','A1B2','C3D4'):
+                self.assertNotIn(secret,str(diff))
+            self.assertIn('pre-shared-key',wire)
+            self.assertIn('operation="replace"',__import__('lxml').etree.tostring(rollback,encoding='unicode'))
+    def test_csv_psk_is_injected_without_a_vault_and_redacted_from_diff(self):
+        parsed=import_configuration_csv(encode(filled()),[1],include_test_secrets=True)
+        parsed['existing_objects_action']='replace_named'
+        _,payload,_,diff=self.a._reconcile(self.d.running,parsed)
+        wire=__import__('lxml').etree.tostring(payload,encoding='unicode')
+        self.assertIn('FIXTURE-PSK',wire);self.assertNotIn('FIXTURE-PSK',str(diff))
     def test_longest_prefix_tunnel_recursion_not_hidden_by_default(self):
-        routes=[{'network':__import__('ipaddress').IPv4Network('0.0.0.0/0'),'hops':['192.168.2.1'],'interfaces':['GigabitEthernet0/0/0']},
+        routes=[{'network':__import__('ipaddress').IPv4Network('0.0.0.0/0'),'hops':['192.0.2.1'],'interfaces':['GigabitEthernet0/0/0']},
                 {'network':__import__('ipaddress').IPv4Network('203.0.113.20/32'),'hops':[],'interfaces':['Tunnel1']}]
         self.assertFalse(route_to(routes,'203.0.113.20'))
     def test_unrelated_ike_sa_or_interface_not_accepted(self):
@@ -107,7 +131,7 @@ class NativeTests(unittest.TestCase):
         tree=parse_xml(f'<data xmlns="{NC}"><crypto-oper-data xmlns="{CO}"><crypto-ikev2-sa><sa-data><remote-ip-addr>203.0.113.20</remote-ip-addr><sa-status>crypto-sa-status-active</sa-status></sa-data></crypto-ikev2-sa><crypto-ipsec-ident><interface>Tunnel100</interface><ident-data><remote-endpt-addr>203.0.113.20</remote-endpt-addr><inbound-esp-sa><dir>crypto-dir-inbound</dir><sa-status>crypto-sa-status-active</sa-status></inbound-esp-sa><outbound-esp-sa><dir>crypto-dir-outbound</dir><sa-status>crypto-sa-status-active</sa-status></outbound-esp-sa></ident-data></crypto-ipsec-ident></crypto-oper-data></data>')
         self.assertTrue(crypto_up(tree,'Tunnel100','203.0.113.20'))
     def test_partial_owned_candidate_can_be_cleaned(self):
-        self.a.build(self.d,self.p);base,expected,_=self.a.states[id(self.d)]
+        self.a.build(self.d,self.p);base,expected,_,_=self.a.states[id(self.d)]
         self.d.running=deepcopy(base)
         # Simulate edit-config staging one fully approved object then failing.
         wanted=expected.find(f'{{{N}}}native/{{{N}}}crypto/{{{C}}}ikev2/{{{C}}}proposal')
@@ -116,41 +140,80 @@ class NativeTests(unittest.TestCase):
         self.d.running.find(f'{{{N}}}native/{{{N}}}hostname').text='someone-else'
         self.assertFalse(self.a.candidate_changes_owned(self.d,digest(base),''))
     def test_unknown_peer_psk_change_is_never_owned(self):
-        self.a.build(self.d,self.p);base,expected,_=self.a.states[id(self.d)]
+        self.a.build(self.d,self.p);base,expected,_,_=self.a.states[id(self.d)]
         self.d.running=deepcopy(expected)
         self.d.running.find(f'.//{{{C}}}pre-shared-key/{{{C}}}key').text='foreign-key'
         self.assertFalse(self.a.candidate_changes_owned(self.d,digest(base),''))
     def test_matching_objects_not_rewritten_on_second_pass(self):
-        expected,_,_=self.a._reconcile(self.d.running,self.p)
+        expected,_,_,_=self.a._reconcile(self.d.running,self.p)
         p=deepcopy(self.p);p['tunnel_interface_intent'][0].update(action='reuse',change_scope='review exact settings')
-        _,_,diff=self.a._reconcile(expected,p)
+        _,_,_,diff=self.a._reconcile(expected,p)
         self.assertEqual(diff,[])
+    def test_referenced_pbr_acl_is_reconciled_by_sequence(self):
+        current,_,_,_=self.a._reconcile(self.d.running,self.p)
+        changed=deepcopy(self.p)
+        changed['provisioning_spec']['pbr']['bypass_destination_prefixes']=[]
+        changed['existing_objects_action']='replace_named'
+        changed['tunnel_interface_intent'][0].update(action='reuse',reuse_confirmed=True,change_scope='test')
+        _,payload,rollback,diff=self.a._reconcile(current,changed)
+        acl=payload.find(f'.//{{{A}}}extended')
+        self.assertIsNotNone(acl)
+        self.assertIsNone(acl.get(f'{{{NC}}}operation'))
+        entries=acl.findall(f'{{{A}}}access-list-seq-rule')
+        self.assertEqual([e.findtext(f'{{{A}}}sequence') for e in entries],['10'])
+        self.assertEqual([e.get(f'{{{NC}}}operation') for e in entries],['delete'])
+        reverse=rollback.find(f'.//{{{A}}}extended')
+        self.assertEqual([e.get(f'{{{NC}}}operation') for e in reverse.findall(f'{{{A}}}access-list-seq-rule')],['replace'])
+        self.assertEqual([(x['object'],x['action']) for x in diff],[('pbr_acl','replace')])
     def test_metric_default_normalization(self):
-        a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd><metric>1</metric></fwd-list>')
-        b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.168.2.1</fwd></fwd-list>')
+        a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd><metric>1</metric></fwd-list>')
+        b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd></fwd-list>')
         self.assertEqual(digest(a),digest(b))
+    def test_acl_verification_accepts_resequence_but_not_rule_changes(self):
+        def acl(first,second='deny'):
+            return parse_xml(f'<data xmlns="{NC}"><extended xmlns="{A}"><name>x</name><access-list-seq-rule><sequence>{first}</sequence><ace-rule><action>permit</action></ace-rule></access-list-seq-rule><access-list-seq-rule><sequence>{int(first)+10}</sequence><ace-rule><action>{second}</action></ace-rule></access-list-seq-rule></extended></data>')
+        self.assertEqual(digest_nonsecret_acl_order(acl('10')),digest_nonsecret_acl_order(acl('30')))
+        self.assertNotEqual(digest_nonsecret_acl_order(acl('10')),digest_nonsecret_acl_order(acl('30','permit')))
+    def test_acl_verification_ignores_openconfig_compatibility_mirror(self):
+        left=parse_xml(f'<data xmlns="{NC}"><acl xmlns="http://openconfig.net/yang/acl"><acl-sets><acl-set><name>x</name></acl-set></acl-sets></acl><native xmlns="{N}"><hostname>r1</hostname></native></data>')
+        right=parse_xml(f'<data xmlns="{NC}"><acl xmlns="http://openconfig.net/yang/acl"><acl-sets><acl-set><name>regenerated</name></acl-set></acl-sets></acl><native xmlns="{N}"><hostname>r1</hostname></native></data>')
+        self.assertEqual(digest_nonsecret_acl_order(left),digest_nonsecret_acl_order(right))
+    def test_openconfig_native_vlan_visibility_artifact_is_normalized(self):
+        vlan='http://openconfig.net/yang/vlan'
+        absent=parse_xml(f'<data xmlns="{NC}"><interfaces><interface><ethernet><switched-vlan><config/></switched-vlan></ethernet></interface></interfaces></data>')
+        visible=parse_xml(f'<data xmlns="{NC}"><interfaces><interface><ethernet><switched-vlan><config><native-vlan xmlns="{vlan}">101</native-vlan></config></switched-vlan></ethernet></interface></interfaces></data>')
+        self.assertEqual(digest(absent),digest(visible))
+        unrelated_a=parse_xml(f'<data xmlns="{NC}"><native-vlan xmlns="{vlan}">101</native-vlan></data>')
+        unrelated_b=parse_xml(f'<data xmlns="{NC}"/>')
+        self.assertNotEqual(digest(unrelated_a),digest(unrelated_b))
+    def test_iosxe_materialized_equivalent_aliases_are_normalized(self):
+        canonical=parse_xml(f'''<data xmlns="{NC}"><address xmlns="{C}"><local-ip>192.0.2.1</local-ip></address><mode xmlns="{C}"><tunnel-choice/></mode><ipsec xmlns="{C}"><profile-option><name>P</name></profile-option></ipsec><set xmlns="{R}"><interface-list>Tunnel100</interface-list></set></data>''')
+        materialized=parse_xml(f'''<data xmlns="{NC}"><address xmlns="{C}"><local-ip>192.0.2.1</local-ip><local>192.0.2.1</local></address><mode xmlns="{C}"><tunnel-choice/><tunnel/></mode><ipsec xmlns="{C}"><profile-option><name>P</name></profile-option><profile>P</profile></ipsec><set xmlns="{R}"><interface-list>Tunnel100</interface-list><interface><Tunnel>100</Tunnel></interface></set></data>''')
+        self.assertEqual(digest(canonical),digest(materialized))
+        materialized.find(f'{{{C}}}address/{{{C}}}local').text='192.0.2.2'
+        self.assertNotEqual(digest(canonical),digest(materialized))
     def test_prechecks_actual_client_and_missing_psk(self):
         from types import SimpleNamespace
-        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.10.10.9',4444))))
+        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.77.10.9',4444))))
         self.d.server_capabilities=Device.server_capabilities+['http://test?module='+n+'&revision='+rev for n,rev in [('Cisco-IOS-XE-interfaces-oper','2021-03-01'),('Cisco-IOS-XE-crypto-oper','2021-03-01'),('ietf-routing','2015-05-25')]]
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.10.10.0/24</destination-prefix><next-hop><next-hop-address>10.2.3.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.168.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.77.10.0/24</destination-prefix><next-hop><next-hop-address>198.51.100.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.0.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
         interfaces=parse_xml(f'<data xmlns="{NC}"><interfaces xmlns="{IO}"><interface><name>GigabitEthernet0/0/0</name><admin-status>if-state-up</admin-status><oper-status>if-oper-state-ready</oper-status></interface></interfaces></data>')
         self.a._oper=lambda device,ns,root:routing if ns==RO else interfaces
         self.assertTrue(self.a.prechecks(self.d,self.p))
         self.d.running.find(f'.//{{{C}}}peer/{{{C}}}pre-shared-key').getparent().remove(self.d.running.find(f'.//{{{C}}}peer/{{{C}}}pre-shared-key'))
         with self.assertRaises(ApplyBlocked):self.a.prechecks(self.d,self.p)
     def test_prechecks_reject_wan_ip_mismatch(self):
-        self.p['provisioning_spec']['router_wan_ip']='192.168.2.111'
-        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.10.10.9',4444))))
+        self.p['provisioning_spec']['router_wan_ip']='192.0.2.111'
+        self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.77.10.9',4444))))
         self.d.server_capabilities=Device.server_capabilities+['http://test?module='+n+'&revision='+rev for n,rev in [('Cisco-IOS-XE-interfaces-oper','2021-03-01'),('Cisco-IOS-XE-crypto-oper','2021-03-01'),('ietf-routing','2015-05-25')]]
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.10.10.0/24</destination-prefix><next-hop><next-hop-address>10.2.3.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.168.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><ribs><rib><name>ipv4-default</name><routes><route><destination-prefix>10.77.10.0/24</destination-prefix><next-hop><next-hop-address>198.51.100.2</next-hop-address><outgoing-interface>GigabitEthernet0/0/1</outgoing-interface></next-hop></route><route><destination-prefix>192.0.2.0/24</destination-prefix><next-hop><outgoing-interface>GigabitEthernet0/0/0</outgoing-interface></next-hop></route></routes></rib></ribs></routing-state></data>')
         interfaces=parse_xml(f'<data xmlns="{NC}"><interfaces xmlns="{IO}"><interface><name>GigabitEthernet0/0/0</name><admin-status>if-state-up</admin-status><oper-status>if-oper-state-ready</oper-status></interface></interfaces></data>')
         self.a._oper=lambda device,ns,root:routing if ns==RO else interfaces
         with self.assertRaisesRegex(ApplyBlocked,'router_wan_ip'):
             self.a.prechecks(self.d,self.p)
     def test_client_outside_management_rejected(self):
         self.d._session=SimpleNamespace(_transport=SimpleNamespace(sock=SimpleNamespace(getsockname=lambda:('10.99.99.9',4444))))
-        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><rib><name>ipv4-default</name><routes><route><destination-prefix>0.0.0.0/0</destination-prefix><next-hop><next-hop-address>192.168.2.1</next-hop-address></next-hop></route></routes></rib></routing-state></data>')
+        routing=parse_xml(f'<data xmlns="{NC}"><routing-state xmlns="{RO}"><rib><name>ipv4-default</name><routes><route><destination-prefix>0.0.0.0/0</destination-prefix><next-hop><next-hop-address>192.0.2.1</next-hop-address></next-hop></route></routes></rib></routing-state></data>')
         self.a._oper=lambda *args:routing
         with self.assertRaises(ApplyBlocked):self.a.prechecks(self.d,self.p)
     def test_validation_fixture_cannot_enter_build(self):
@@ -201,5 +264,8 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(leaf.text,'i:value');self.assertEqual(original.tag,f'{{{NC}}}data')
 
 if __name__=='__main__':unittest.main()
+
+
+
 
 

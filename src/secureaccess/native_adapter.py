@@ -29,6 +29,8 @@ KEYS={'proposal':('name',),'policy':('name',),'keyring':('name',),'peer':('name'
       'fwd-list':('fwd',),'route-map-without-order-seq':('seq_no',),
       'access-list-seq-rule':('sequence',)}
 SECRET=re.compile(r'password|secret|pre-shared|private-key|community|^key$|^hex$',re.I)
+OPENCONFIG_VLAN='http://openconfig.net/yang/vlan'
+OPENCONFIG_ACL='http://openconfig.net/yang/acl'
 
 def identity(node):
     ns=etree.QName(node).namespace
@@ -41,11 +43,39 @@ def find(parent,wanted):
     if len(nodes)>1: raise ApplyBlocked('Ambiguous native list encoding; unsupported configuration')
     return nodes[0] if nodes else None
 
+def unstable_test_only_leaf(node):
+    """Ignore the IOS XE get-config visibility artifact after test-only."""
+    if node.tag != f'{{{OPENCONFIG_VLAN}}}native-vlan': return False
+    ancestors=[];parent=node.getparent()
+    while parent is not None and len(ancestors)<5:
+        ancestors.append(etree.QName(parent).localname);parent=parent.getparent()
+    return ancestors[:4]==['config','switched-vlan','ethernet','interface']
+
+def materialized_alias(node):
+    """Recognize IOS XE leaves materialized beside an equivalent canonical leaf."""
+    parent=node.getparent()
+    if parent is None: return False
+    text=(node.text or '').strip()
+    if node.tag==f'{{{C}}}local' and parent.tag==f'{{{C}}}address':
+        return text==(parent.findtext(f'{{{C}}}local-ip') or '').strip()
+    if node.tag==f'{{{C}}}tunnel' and parent.tag==f'{{{C}}}mode':
+        return parent.find(f'{{{C}}}tunnel-choice') is not None and len(node)==0 and not text
+    if node.tag==f'{{{C}}}profile' and parent.tag==f'{{{C}}}ipsec':
+        canonical=parent.findtext(f'{{{C}}}profile-option/{{{C}}}name')
+        return canonical is not None and text==canonical.strip()
+    if node.tag==f'{{{R}}}interface' and parent.tag==f'{{{R}}}set':
+        tunnel=node.findtext(f'{{{R}}}Tunnel')
+        canonical=parent.findtext(f'{{{R}}}interface-list')
+        return tunnel is not None and canonical==f'Tunnel{tunnel.strip()}'
+    return False
+
 def semantic(node):
     # Prefix-independent fingerprint; preserve repeated-node order for user lists.
     groups={}
     for child in node:
         if child.tag==f'{{{N}}}metric' and (child.text or '').strip()=='1': continue
+        if unstable_test_only_leaf(child): continue
+        if materialized_alias(child): continue
         if isinstance(child.tag,str): groups.setdefault(child.tag,[]).append(semantic(child))
     for tag,values in groups.items():
         if etree.QName(tag).localname in KEYS:
@@ -53,6 +83,39 @@ def semantic(node):
     return (node.tag,(node.text or '').strip(),tuple((tag,tuple(values)) for tag,values in sorted(groups.items())))
 
 def digest(node): return sha256(repr(semantic(node)).encode()).hexdigest()
+
+def digest_nonsecret(node):
+    clean=deepcopy(node)
+    for item in list(clean.iter()):
+        if SECRET.search(etree.QName(item).localname):
+            parent=item.getparent()
+            if parent is not None: parent.remove(item)
+    return digest(clean)
+
+def digest_nonsecret_acl_order(node):
+    """Compare ACL rule order and content while tolerating IOS XE resequencing."""
+    clean=deepcopy(node)
+    # IOS XE regenerates its OpenConfig ACL compatibility mirror after native
+    # ACL edits. The native ACL below is the authoritative configured object.
+    for item in list(clean.iter()):
+        if etree.QName(item).namespace==OPENCONFIG_ACL:
+            parent=item.getparent()
+            if parent is not None and etree.QName(parent).namespace!=OPENCONFIG_ACL:
+                parent.remove(item)
+    for item in list(clean.iter()):
+        if SECRET.search(etree.QName(item).localname):
+            parent=item.getparent()
+            if parent is not None: parent.remove(item)
+    for acl in clean.findall(f'.//{{{A}}}extended'):
+        entries=acl.findall(f'{{{A}}}access-list-seq-rule')
+        try:
+            ordered=sorted(entries,key=lambda entry:int(entry.findtext(f'{{{A}}}sequence')))
+        except (TypeError,ValueError):
+            ordered=entries
+        for index,entry in enumerate(ordered,1):
+            sequence=entry.find(f'{{{A}}}sequence')
+            if sequence is not None: sequence.text=str(index*10)
+    return digest(clean)
 
 def drift_scopes(before,after,limit=32):
     """Return value-free schema scopes changed between snapshots."""
@@ -67,6 +130,22 @@ def drift_scopes(before,after,limit=32):
             if scope not in changed:changed.append(scope)
             if len(changed)>=limit:break
     return changed
+
+def pbr_acl_summary(tree):
+    """Value-limited ACL diagnostics; no raw XML or secret-bearing nodes."""
+    result=[]
+    for acl in tree.findall(f'.//{{{A}}}extended'):
+        rules=[]
+        for entry in acl.findall(f'{{{A}}}access-list-seq-rule'):
+            def one(name):
+                values=entry.xpath(f".//*[local-name()='{name}']/text()")
+                return values[0] if values else None
+            rules.append({'sequence':one('sequence'),'action':one('action'),
+                          'source':one('ipv4-address') or ('any' if entry.xpath(".//*[local-name()='any']") else None),
+                          'source_mask':one('mask'),'destination':one('dest-ipv4-address'),
+                          'destination_mask':one('dest-mask')})
+        result.append({'name':acl.findtext(f'{{{A}}}name'),'rules':rules})
+    return result
 
 
 def flattened(node,path=()):
@@ -115,10 +194,11 @@ def schema_text(device,name):
 
 class IOSXENativeAdapter:
     adapter_id='iosxe-native-17.9-vpn-pbr-v1'
-    def __init__(self,schemas=None):
+    def __init__(self,schemas=None,secret_resolver=None):
         path=Path(__file__).resolve().parent/'schemas'/'profile.json'
         self.schemas=schemas if schemas is not None else json.loads(path.read_text(encoding='utf-8'))
-        self.states={};self.mutex=threading.RLock()
+        self.secret_resolver=secret_resolver
+        self.states={};self.mutex=threading.RLock();self.last_verification_report=None
 
     def qualified_for(self,device,intent):
         caps=[str(c).strip() for c in device.server_capabilities]
@@ -146,11 +226,16 @@ class IOSXENativeAdapter:
 
     def _reconcile(self,baseline,intent):
         spec,selections,existing_action=self._intent(intent)
-        desired=parse_xml(render_netconf(spec)['configuration_xml_preview'])
-        expected=deepcopy(baseline);payload=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap);diff=[]
+        inline_psks=intent.get('_test_psks',{}) if isinstance(intent,dict) else {}
+        def resolve_psk(tunnel_id,headend):
+            value=inline_psks.get(f'{tunnel_id}/{headend}')
+            return value if value is not None else (self.secret_resolver(tunnel_id,headend) if self.secret_resolver else None)
+        desired=parse_xml(render_netconf(spec,resolve_psk)['configuration_xml_preview'])
+        expected=deepcopy(baseline);payload=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap)
+        rollback=etree.Element(f'{{{NC}}}config',nsmap=desired.nsmap);diff=[]
         # Atom paths are generated locally; never selected by caller XML/XPath.
         def atom(wanted,path,kind,force_replace=False):
-            parent=expected;p_parent=payload
+            parent=expected;p_parent=payload;r_parent=rollback
             for template in path:
                 present=find(parent,template)
                 if present is None:
@@ -164,10 +249,16 @@ class IOSXENativeAdapter:
                     for key in KEYS.get(etree.QName(template).localname,()):
                         k=template.find(f'{{{etree.QName(template).namespace}}}{key}')
                         if k is not None: out.append(deepcopy(k))
-                parent=present;p_parent=out
+                reverse=find(r_parent,template)
+                if reverse is None:
+                    reverse=etree.SubElement(r_parent,template.tag)
+                    for key in KEYS.get(etree.QName(template).localname,()):
+                        k=template.find(f'{{{etree.QName(template).namespace}}}{key}')
+                        if k is not None: reverse.append(deepcopy(k))
+                parent=present;p_parent=out;r_parent=reverse
             old=find(parent,wanted)
             replacement=deepcopy(wanted)
-            if kind=='peer' and old is not None:
+            if kind=='peer' and old is not None and replacement.find(f'{{{C}}}pre-shared-key') is None:
                 # Secrets are copied in-memory only; unrelated peers remain outside this atom.
                 for child in old:
                     if etree.QName(child).localname=='pre-shared-key': replacement.append(deepcopy(child))
@@ -209,12 +300,70 @@ class IOSXENativeAdapter:
                         replacement.append(deepcopy(child))
                 shutdown=replacement.find(f'{{{N}}}shutdown')
                 if shutdown is not None: replacement.remove(shutdown)
+            if kind=='pbr_acl' and old is not None:
+                # Sequence numbers are list keys, not ACL semantics. Preserve the
+                # keys of equivalent existing ACEs so removing bypass rules only
+                # deletes those rules instead of rewriting every permit below them.
+                def rule_without_sequence(rule):
+                    body=deepcopy(rule)
+                    sequence=body.find(f'{{{A}}}sequence')
+                    if sequence is not None: body.remove(sequence)
+                    return semantic(body)
+                available={}
+                for entry in old.findall(f'{{{A}}}access-list-seq-rule'):
+                    available.setdefault(rule_without_sequence(entry),[]).append(entry)
+                for entry in replacement.findall(f'{{{A}}}access-list-seq-rule'):
+                    matches=available.get(rule_without_sequence(entry),[])
+                    if not matches: continue
+                    prior=matches.pop(0)
+                    old_sequence=prior.find(f'{{{A}}}sequence')
+                    new_sequence=entry.find(f'{{{A}}}sequence')
+                    if old_sequence is not None and new_sequence is not None:
+                        new_sequence.text=old_sequence.text
             if old is not None and semantic(old)==semantic(replacement): return
             if old is not None and not force_replace and existing_action!='replace_named':
                 raise ApplyBlocked('Existing '+kind+' object '+str(identity(wanted)[1])+' differs; review and select existing_objects_action=replace_named')
             if old is not None: parent.remove(old)
             parent.append(deepcopy(replacement))
-            edit=deepcopy(replacement);edit.set(f'{{{NC}}}operation','replace');p_parent.append(edit)
+            if kind=='pbr_acl' and old is not None:
+                # An ACL referenced by a route-map cannot be replaced as a list root
+                # on this IOS XE build. Reconcile its keyed ACEs in place instead.
+                edit=etree.Element(replacement.tag)
+                reverse=etree.Element(old.tag)
+                for container,source in ((edit,replacement),(reverse,old)):
+                    key=source.find(f'{{{A}}}name')
+                    if key is not None: container.append(deepcopy(key))
+                old_entries={identity(x):x for x in old.findall(f'{{{A}}}access-list-seq-rule')}
+                new_entries={identity(x):x for x in replacement.findall(f'{{{A}}}access-list-seq-rule')}
+                for key in sorted(old_entries.keys()|new_entries.keys(),key=repr):
+                    prior,current=old_entries.get(key),new_entries.get(key)
+                    if prior is not None and current is not None and semantic(prior)==semantic(current): continue
+                    if current is None:
+                        change=etree.Element(prior.tag)
+                        change.append(deepcopy(prior.find(f'{{{A}}}sequence')))
+                        change.set(f'{{{NC}}}operation','delete')
+                    else:
+                        change=deepcopy(current);change.set(f'{{{NC}}}operation','replace')
+                    edit.append(change)
+                    if prior is None:
+                        undo=etree.Element(current.tag)
+                        undo.append(deepcopy(current.find(f'{{{A}}}sequence')))
+                        undo.set(f'{{{NC}}}operation','delete')
+                    else:
+                        undo=deepcopy(prior);undo.set(f'{{{NC}}}operation','replace')
+                    reverse.append(undo)
+                p_parent.append(edit);r_parent.append(reverse)
+            else:
+                edit=deepcopy(replacement);edit.set(f'{{{NC}}}operation','replace');p_parent.append(edit)
+            if old is None:
+                reverse=etree.Element(wanted.tag)
+                for key in KEYS.get(etree.QName(wanted).localname,()):
+                    k=wanted.find(f'{{{etree.QName(wanted).namespace}}}{key}')
+                    if k is not None: reverse.append(deepcopy(k))
+                reverse.set(f'{{{NC}}}operation','delete')
+            elif kind!='pbr_acl':
+                reverse=deepcopy(old);reverse.set(f'{{{NC}}}operation','replace')
+            if kind!='pbr_acl' or old is None: r_parent.append(reverse)
             # No raw baseline XML/PSK leaves in results. Interface diff exposes only reviewed fields.
             before=old
             after=replacement
@@ -275,7 +424,7 @@ class IOSXENativeAdapter:
             if access is not None:
                 for acl in access: atom(acl,[native,ip,access],'pbr_acl')
         for route_map in native.findall(f'{{{N}}}route-map'): atom(route_map,[native],'pbr_route_map')
-        return expected,payload,diff
+        return expected,payload,rollback,diff
 
     def validate_intent(self,device,intent,events=None,probe_baseline=False):
         def stage(name):
@@ -285,7 +434,7 @@ class IOSXENativeAdapter:
         stage('read_running')
         before=data(device,'running')
         stage('reconcile')
-        expected,payload,diff=self._reconcile(before,intent)
+        expected,payload,rollback,diff=self._reconcile(before,intent)
         # RFC 6241 validate:1.1: test-only performs validation without attempting
         # to set. A successful RPC is the validation result. Full running
         # snapshots are not a stable equality oracle on IOS XE.
@@ -300,19 +449,38 @@ class IOSXENativeAdapter:
 
     def build(self,device,intent):
         if isinstance(intent,dict) and intent.get('fixture_only'): raise ApplyBlocked('Schema fixtures can never be applied')
-        baseline=data(device,'running');expected,payload,diff=self._reconcile(baseline,intent)
+        baseline=data(device,'running');expected,payload,rollback,diff=self._reconcile(baseline,intent)
         device.edit_config(target='running',config=payload,default_operation='merge',
                            test_option='test-only',error_option='stop-on-error')
         if digest(data(device,'running'))!=digest(baseline):
             raise ApplyBlocked('Running changed during test-only build validation')
         with self.mutex:
             if len(self.states)>=64 and id(device) not in self.states: raise ApplyBlocked('Too many adapter snapshots')
-            self.states[id(device)]=(baseline,expected,payload)
+            self.states[id(device)]=(baseline,expected,payload,rollback)
         return etree.tostring(payload,encoding='unicode'),diff
 
     def candidate_matches(self,device,intent,payload):
         state=self.states.get(id(device))
-        return state is not None and digest(data(device,'candidate'))==digest(state[1])
+        return state is not None and digest_nonsecret(data(device,'candidate'))==digest_nonsecret(state[1])
+
+    def running_matches(self,device,intent,payload):
+        state=self.states.get(id(device))
+        if state is None: return False
+        current=data(device,'running')
+        matched=digest_nonsecret_acl_order(current)==digest_nonsecret_acl_order(state[1])
+        self.last_verification_report=None if matched else {
+            'changed_scopes':drift_scopes(state[1],current),
+            'expected_pbr_acls':pbr_acl_summary(state[1]),
+            'actual_pbr_acls':pbr_acl_summary(current),
+        }
+        return matched
+
+    def rollback_running(self,device):
+        state=self.states.get(id(device))
+        if state is None: return False
+        device.edit_config(target='running',config=state[3],default_operation='merge',
+                           test_option='test-then-set',error_option='rollback-on-error')
+        return digest_nonsecret(data(device,'running'))==digest_nonsecret(state[0])
 
     def candidate_changes_owned(self,device,baseline,payload):
         state=self.states.get(id(device))
@@ -362,11 +530,15 @@ class IOSXENativeAdapter:
             keyring=f'{spec.prefix}-KEYRING-{t.tunnel_id}';peer=f'{spec.prefix}-PEER-{t.tunnel_id}'
             rings=running.findall(f'{{{N}}}native/{{{N}}}crypto/{{{C}}}ikev2/{{{C}}}keyring')
             match=next((r for r in rings if r.findtext(f'{{{C}}}name')==keyring),None)
-            if match is None: raise ApplyBlocked('PSK must first be provisioned in native secret/keyring workflow; CSV never contains PSK')
-            peers=match.findall(f'{{{C}}}peer');entry=next((p for p in peers if p.findtext(f'{{{C}}}name')==peer),None)
-            if entry is None or not psk_present(entry): raise ApplyBlocked('Selected keyring peer lacks configured local/remote PSK')
-            address=entry.findtext(f'{{{C}}}address/{{{C}}}ipv4/{{{C}}}ipv4-address')
-            if address!=str(t.headend): raise ApplyBlocked('PSK peer headend differs; never transfer an existing PSK to a new peer implicitly')
+            peers=match.findall(f'{{{C}}}peer') if match is not None else []
+            entry=next((p for p in peers if p.findtext(f'{{{C}}}name')==peer),None)
+            stored=(intent.get('_test_psks',{}).get(f'{t.tunnel_id}/{t.headend}') if isinstance(intent,dict) else None)
+            if stored is None and self.secret_resolver is not None: stored=self.secret_resolver(t.tunnel_id,str(t.headend))
+            if stored is None and (entry is None or not psk_present(entry)):
+                raise ApplyBlocked('No PSK is available for this tunnel in the native secret store or selected device peer')
+            if entry is not None:
+                address=entry.findtext(f'{{{C}}}address/{{{C}}}ipv4/{{{C}}}ipv4-address')
+                if address!=str(t.headend): raise ApplyBlocked('PSK peer headend differs; never transfer an existing PSK to a new peer implicitly')
         return True
 
     def postchecks(self,device,intent,deadline):
@@ -375,7 +547,7 @@ class IOSXENativeAdapter:
             interfaces=self._oper(device,IO,'interfaces');rib=parse_routes(self._oper(device,RO,'routing-state'))
             crypto=self._oper(device,CO,'crypto-oper-data')
             state=self.states.get(id(device))
-            good=state is not None and digest(data(device,'running'))==digest(state[1])
+            good=state is not None and digest_nonsecret_acl_order(data(device,'running'))==digest_nonsecret_acl_order(state[1])
             good=good and all(interface_up(interfaces,f'Tunnel{t.tunnel_id}') and interface_counters(interfaces,f'Tunnel{t.tunnel_id}') and
                 route_to(rib,t.headend,allow_tunnel=False,required_hop=str(spec.isp_gateway)) and
                 crypto_up(crypto,f'Tunnel{t.tunnel_id}',str(t.headend)) for t in spec.tunnels)
