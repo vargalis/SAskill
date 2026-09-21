@@ -301,9 +301,9 @@ class IOSXENativeAdapter:
                 shutdown=replacement.find(f'{{{N}}}shutdown')
                 if shutdown is not None: replacement.remove(shutdown)
             if kind=='pbr_acl' and old is not None:
-                # Sequence numbers are list keys, not ACL semantics. Preserve the
-                # keys of equivalent existing ACEs so removing bypass rules only
-                # deletes those rules instead of rewriting every permit below them.
+                # Preserve existing keys only when they retain the desired rule
+                # order. New rules can otherwise collide with retained keys or
+                # fall after a permit that shadows them.
                 def rule_without_sequence(rule):
                     body=deepcopy(rule)
                     sequence=body.find(f'{{{A}}}sequence')
@@ -320,6 +320,11 @@ class IOSXENativeAdapter:
                     new_sequence=entry.find(f'{{{A}}}sequence')
                     if old_sequence is not None and new_sequence is not None:
                         new_sequence.text=old_sequence.text
+                entries=replacement.findall(f'{{{A}}}access-list-seq-rule')
+                sequences=[int(entry.findtext(f'{{{A}}}sequence')) for entry in entries]
+                if any(left>=right for left,right in zip(sequences,sequences[1:])):
+                    for index,entry in enumerate(entries,1):
+                        entry.find(f'{{{A}}}sequence').text=str(index*10)
             if old is not None and semantic(old)==semantic(replacement): return
             if old is not None and not force_replace and existing_action!='replace_named':
                 raise ApplyBlocked('Existing '+kind+' object '+str(identity(wanted)[1])+' differs; review and select existing_objects_action=replace_named')
@@ -418,6 +423,13 @@ class IOSXENativeAdapter:
                 for entry in route:
                     network=IPv4Network(entry.findtext(f'{{{N}}}prefix')+'/'+entry.findtext(f'{{{N}}}mask'))
                     if network in spec.management_prefixes: continue # Preserve current management route.
+                    if spec.routing_mode=='static' and network in spec.protected_prefixes:
+                        existing_route=running.find(f'{{{N}}}ip/{{{N}}}route')
+                        current=find(existing_route,entry) if existing_route is not None else None
+                        allowed={forward.findtext(f'{{{N}}}fwd') for forward in entry.findall(f'{{{N}}}fwd-list')}
+                        if current is not None and any(forward.findtext(f'{{{N}}}fwd') not in allowed
+                                for forward in current.findall(f'{{{N}}}fwd-list')):
+                            raise ApplyBlocked('Protected static route has competing next hops; reconcile them separately before applying')
                     for forward in entry.findall(f'{{{N}}}fwd-list'):
                         atom(forward,[native,ip,route,entry],'static_route')
             access=ip.find(f'{{{N}}}access-list')
@@ -553,10 +565,18 @@ class IOSXENativeAdapter:
                 crypto_up(crypto,f'Tunnel{t.tunnel_id}',str(t.headend)) for t in spec.tunnels)
             good=good and all(any(r['network']==p and r['hops'] and not any(i.startswith('Tunnel') for i in r['interfaces']) for r in rib) for p in spec.management_prefixes)
             if spec.routing_mode=='static':
-                good=good and all(any(r['network']==p and f'Tunnel{t.tunnel_id}' in r['interfaces'] for r in rib) for p in spec.protected_prefixes for t in spec.tunnels if t.distance==min(x.distance for x in spec.tunnels))
+                active_tunnels={f'Tunnel{t.tunnel_id}' for t in spec.tunnels
+                                if t.distance==min(x.distance for x in spec.tunnels)}
+                good=good and all(routes_use_tunnels(rib,p,active_tunnels) for p in spec.protected_prefixes)
             if good: return True
             sleep(min(2,max(0,deadline-monotonic())))
         return False
+
+def routes_use_tunnels(routes,prefix,tunnels):
+    selected=[route for route in routes if route['network']==prefix]
+    return bool(selected) and all(route['interfaces'] and set(route['interfaces'])<=tunnels for route in selected) and {
+        interface for route in selected for interface in route['interfaces']}==tunnels
+
 
 def psk_present(peer):
     p=peer.find(f'{{{C}}}pre-shared-key')

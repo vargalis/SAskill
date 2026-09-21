@@ -169,6 +169,76 @@ class NativeTests(unittest.TestCase):
         a=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd><metric>1</metric></fwd-list>')
         b=parse_xml(f'<fwd-list xmlns="{N}"><fwd>192.0.2.1</fwd></fwd-list>')
         self.assertEqual(digest(a),digest(b))
+
+    def test_adding_bypass_preserves_effective_order_and_rollback(self):
+        initial=deepcopy(self.p)
+        initial['provisioning_spec']['pbr']['bypass_destination_prefixes']=[]
+        for sequence in ('5','10','100'):
+            with self.subTest(existing_sequence=sequence):
+                current,_,_,_=self.a._reconcile(self.d.running,initial)
+                acl=current.find(f'.//{{{A}}}extended')
+                acl.find(f'{{{A}}}access-list-seq-rule/{{{A}}}sequence').text=sequence
+                changed=deepcopy(initial)
+                changed['provisioning_spec']['pbr']['bypass_destination_prefixes']=['10.77.10.0/24']
+                changed['existing_objects_action']='replace_named'
+                changed['tunnel_interface_intent'][0].update(action='reuse',change_scope='test')
+                expected,payload,rollback,_=self.a._reconcile(current,changed)
+                def keyed_rules(tree):
+                    return {int(e.findtext(f'{{{A}}}sequence')):deepcopy(e)
+                            for e in tree.findall(f'.//{{{A}}}extended/{{{A}}}access-list-seq-rule')}
+                original=keyed_rules(current)
+                actual=deepcopy(original)
+                def apply_patch(tree):
+                    for key,entry in keyed_rules(tree).items():
+                        operation=entry.attrib.pop(f'{{{NC}}}operation')
+                        if operation=='delete': del actual[key]
+                        else: actual[key]=entry
+                apply_patch(payload)
+                self.assertEqual([actual[key].findtext(f'{{{A}}}ace-rule/{{{A}}}action')
+                                  for key in sorted(actual)],['deny','permit'])
+                desired=keyed_rules(expected)
+                self.assertEqual({k:digest(v) for k,v in actual.items()},
+                                 {k:digest(v) for k,v in desired.items()})
+                apply_patch(rollback)
+                self.assertEqual({k:digest(v) for k,v in actual.items()},
+                                 {k:digest(v) for k,v in original.items()})
+
+    def test_protected_static_route_rejects_unselected_next_hops(self):
+        selected=deepcopy(self.p)
+        selected['provisioning_spec'].update(routing_mode='static',pbr=None,protected_prefixes=['10.88.0.0/24'])
+        for forward in ('192.0.2.1','Tunnel999'):
+            for action in ('reject','replace_named'):
+                with self.subTest(forward=forward,action=action):
+                    baseline=deepcopy(self.d.running)
+                    baseline.find(f'{{{N}}}native/{{{N}}}ip/{{{N}}}route').append(parse_xml(
+                        f'<ip-route-interface-forwarding-list xmlns="{N}"><prefix>10.88.0.0</prefix>'
+                        f'<mask>255.255.255.0</mask><fwd-list><fwd>{forward}</fwd></fwd-list>'
+                        '</ip-route-interface-forwarding-list>'))
+                    selected['existing_objects_action']=action
+                    before=digest(baseline)
+                    with self.assertRaisesRegex(ApplyBlocked,'competing next hops'):
+                        self.a._reconcile(baseline,selected)
+                    self.assertEqual(digest(baseline),before)
+        selected['existing_objects_action']='reject'
+        expected,_,_,_=self.a._reconcile(self.d.running,selected)
+        selected['tunnel_interface_intent'][0].update(action='reuse',change_scope='test')
+        _,_,_,diff=self.a._reconcile(expected,selected)
+        self.assertEqual(diff,[])
+
+    def test_static_operational_routes_require_only_selected_tunnels(self):
+        from ipaddress import IPv4Network
+        from secureaccess.native_adapter import routes_use_tunnels
+        prefix=IPv4Network('10.88.0.0/24')
+        def route(*interfaces):
+            return {'network':prefix,'interfaces':list(interfaces),'hops':['192.0.2.1']}
+        self.assertTrue(routes_use_tunnels([route('Tunnel100')],prefix,{'Tunnel100'}))
+        self.assertTrue(routes_use_tunnels([route('Tunnel100'),route('Tunnel101')],prefix,{'Tunnel100','Tunnel101'}))
+        for routes in ([],[route('Tunnel100','GigabitEthernet0/0/0')],
+                       [route('Tunnel100'),route('GigabitEthernet0/0/0')],
+                       [route('Tunnel100'),route()], [route('Tunnel999')]):
+            with self.subTest(routes=routes):
+                self.assertFalse(routes_use_tunnels(routes,prefix,{'Tunnel100'}))
+        self.assertFalse(routes_use_tunnels([route('Tunnel100')],prefix,{'Tunnel100','Tunnel101'}))
     def test_acl_verification_accepts_resequence_but_not_rule_changes(self):
         def acl(first,second='deny'):
             return parse_xml(f'<data xmlns="{NC}"><extended xmlns="{A}"><name>x</name><access-list-seq-rule><sequence>{first}</sequence><ace-rule><action>permit</action></ace-rule></access-list-seq-rule><access-list-seq-rule><sequence>{int(first)+10}</sequence><ace-rule><action>{second}</action></ace-rule></access-list-seq-rule></extended></data>')
@@ -264,7 +334,6 @@ class NamespaceTests(unittest.TestCase):
         self.assertEqual(leaf.text,'i:value');self.assertEqual(original.tag,f'{{{NC}}}data')
 
 if __name__=='__main__':unittest.main()
-
 
 
 

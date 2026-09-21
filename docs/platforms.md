@@ -1,37 +1,40 @@
-# Windows, macOS, and Linux
+# Workstation installation and access
 
-Requirements: Python 3.11+, a Codex CLI with plugin support, and the bundled
-plugin-creator helpers. The plugin uses a local stdio MCP server.
+Use the complete installation and operation guide in your preferred language:
 
-Run `python3 scripts/install_local.py` on macOS/Linux or
-`py -3 scripts/install_local.py` on Windows. If `codex` is not in PATH, pass
-`--codex` with its full path.
+- [English: prerequisites, macOS/Linux and Windows commands, credentials, SSH enrollment and usage](user-guide.en.md)
+- [Русский: подготовка, команды macOS/Linux и Windows, credentials, SSH и использование](user-guide.ru.md)
 
-The installed source is `~/plugins/agent-for-secureaccess`; its isolated runtime
-is `~/plugins/.runtimes/agent-for-secureaccess`. The installer creates a portable
-`python -m secureaccess_mcp` entry point and a machine-specific `.mcp.json`.
+The installer requires Python 3.11+, Codex CLI plugin support, bundled plugin-creator
+helpers and package-download access. Run it as the same OS user as Codex:
 
-Secrets use Windows Credential Manager, macOS Keychain, or Linux Secret Service.
-No file fallback is used. Run these commands interactively:
-
-```text
-python scripts/setup_local.py password
-python scripts/setup_local.py tunnel-psk
+```sh
+# macOS/Linux, from the repository root
+python3 scripts/install_local.py
 ```
 
-The native-vault tunnel PSK action asks for Tunnel ID, headend, shared or split
-keys, and the format of each key. Supported formats are plain IOS type 0, IOS
-encrypted type 6, and hexadecimal. Prompts are hidden and require confirmation.
-The test build can instead store the same values directly in CSV.
+```powershell
+# Windows PowerShell, from the repository root
+py -3 scripts/install_local.py
+```
 
-Headless Linux may explicitly set `SECUREACCESS_SECRET_PROVIDER=environment` and
-provide `ISR_PASSWORD` from its process secret manager. The test build can instead
-read the NETCONF username/password and tunnel PSKs from CSV. These values are
-redacted from generated previews, diffs, diagnostics, and logs.
+Use `--codex` with the executable's full path if it is not on PATH. The installer
+copies source to `~/plugins/agent-for-secureaccess`, creates its runtime under
+`~/plugins/.runtimes/agent-for-secureaccess`, writes `.mcp.json` and registers the
+personal plugin. Re-run it from updated source to update; reload and open a new task.
 
-SSH host keys are verified through `~/.ssh/known_hosts`. Secrets do not migrate
-between machines automatically.
+Set SECUREACCESS_HOST in the actual MCP process environment; there is no default
+router. Set SECUREACCESS_USER for discovery using stored/environment credentials.
+A shell export does not configure an already running desktop app. The guides show
+runtime-specific helper commands and how to verify the target and live connection.
 
-### Local target configuration
+Native login storage uses Windows Credential Manager, macOS Keychain or Linux
+Secret Service. SSH host keys must be independently verified and enrolled in
+`~/.ssh/known_hosts`. Secrets do not migrate between machines automatically.
+The explicit `SECUREACCESS_SECRET_PROVIDER=environment` / `ISR_PASSWORD` alternative
+supplies the login password only, not tunnel PSKs.
 
-Before starting the server or local setup, set `SECUREACCESS_HOST` to your router management address. Set `SECUREACCESS_USER` when using stored credentials; CSV login credentials are also supported. No router address or username is built in. Restart the server after changing these environment variables. Fill `<<< REQUIRED >>>` fields in a private copy of the CSV template. Never commit the filled deployment file.
+Current CSV validation requires login credentials and PSKs in the CSV despite the
+adapter's internal vault/device-key support. Vault setup is useful for discovery
+but does not eliminate those CSV fields. Read the guides' limitations and secret
+handling section before beginning a deployment.

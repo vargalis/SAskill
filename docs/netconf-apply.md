@@ -1,109 +1,135 @@
-# CSV â†’ IOS XE NETCONF
+# CSV → IOS XE NETCONF: current transaction reference
 
-The IOS XE native VPN/PBR adapter is implemented and registered. It covers IKEv2
-proposal/policy/keyring peer/profile, IPsec transform/profile, selected TunnelN,
-source Loopback, static routes, extended PBR ACL, route-map and ingress attachment.
-CSV is the default input; no wizard is required. FMC/FDM templates remain a later phase.
+Complete procedures: [English](user-guide.en.md) · [Русский](user-guide.ru.md).
+This page describes the current implementation, not a hardware qualification report.
 
-## Workflow
+## Scope and entry points
 
-1. Fill the public CSV; `preview_configuration_csv` validates its structure.
-2. `validate_configuration_csv` fetches current config only in memory, checks exact
-   seven model/submodule digests from the qualification router, reconciles each selected object and
-   sends the complete proposed datastore as inline `validate` source (NETCONF 1.1).
-   This does not call edit-config or commit and works without candidate.
-3. For the test build, place the tunnel PSK in the CSV. Shared and separate
-   local/remote keys are supported as plain type 0, encrypted type 6, or hex.
-   The native-vault workflow remains available as an alternative.
-4. `prepare_configuration_apply` additionally checks management client return
-   address, global operational RIB, ISP gateway/source interface, pre-provisioned
-   peer PSKs and transaction capabilities. It returns the exact public diff and
-   one-use plan/digest. The secret-bearing payload is private for 15 minutes.
-5. After explicit approval of that exact diff and an exclusive change window,
-   `apply_configuration_plan` locks running/candidate, rechecks baseline/clean
-   candidate, rebuilds and inline-validates, stages only selected atoms, checks the
-   complete candidate, validates candidate and sends a nonpersistent confirmed commit.
-6. Bounded postchecks verify selected VTI admin/oper state, observed input/output
-   counters, exact headend IKEv2 SA and inbound/outbound ESP SAs, global headend
-   routing through the ISP, preserved management path and complete expected config.
-   Only success triggers final commit. Failure cancels/closes and reconnects to
-   verify restoration. Unknown results fail. An uncertain final commit is never retried.
+The registered native adapter renders IKEv2 proposal/policy/keyring peer/profile,
+IPsec transform/profile, selected Tunnel interfaces, optional source Loopback,
+static routes, PBR ACL, route-map and ingress policy attachment. Exact schema
+hashes are in [profile.json](../backend/secureaccess/schemas/profile.json).
+FTD/FMC/FDM remains planning-only. The legacy YAML CLI does not apply changes.
 
-## Existing configuration
+| Tool | Effect and interpretation |
+| --- | --- |
+| `connection_status` | Local target, vault and known_hosts readiness; no live connection. |
+| `inventory_capabilities`, `routing_summary`, `configuration_summary` | Read-only router discovery using stored/environment login credentials. |
+| `create_configuration_csv`, `preview_configuration_csv` | Offline template and input validation; no device I/O. |
+| `tunnel_psk_status` | Native-vault presence for CSV tunnel identities, not authentication proof. |
+| `validate_configuration_csv` | Reconciles the CSV and sends a generated patch with `edit-config(test-option=test-only)`; no commit/application. |
+| `validate_adapter_fixture` | Optional GCM/CBC nonproduction test-only probes. Fixtures cannot enter build/apply. |
+| `prepare_configuration_apply` | Checks prerequisites, validates the patch, verifies stable running and stores a private one-use plan. |
+| `apply_configuration_plan` | Mutates only after explicit exact-plan approval and an exclusive window. |
 
-Tunnel create/reuse is checked against fresh inventory. Explicit reuse retains
-unrelated interface settings and replaces reviewed address/MTU/MSS/VTI settings;
-shutdown is removed on the selected tunnel. Other tunnels are untouched.
-`network;1;existing_objects_action;replace_named` explicitly permits replacing the
-generated named crypto/PBR objects. Default is reject on a conflict; a matching
-object is reused. The diff shows the exact selected identities and before/after
-public configuration. ACL/route-map replacement removes stale rules. Ingress policy
-replacement is explicit. PSKs stay in memory and are never exported or moved to a
-different headend. Unrelated keyring peers remain unchanged. New authentication
-requires a matching CSV, native-vault, or existing device PSK.
-Management static routes are retained. PBR does not replace the ISP default or the
-five local routes. Static protected prefixes overlapping management are rejected.
+## Input, secrets and qualification
 
-## Validation evidence and current router
+The current test CSV importer requires login credentials and shared or split PSKs.
+Native-vault/device-secret support exists in the adapter but does not remove those
+CSV requirements. Values in the input file and MCP arguments remain sensitive even
+though generated outputs are redacted. See the guides before handling real secrets.
 
-The shipped schema profile was read live from the qualification router via NETCONF get-schema.
-Unit tests exercise reconciliation, preservation, conflict rejection, exact schema
-selection, transaction failures, owned partial cleanup, rollback and commit uncertainty.
-Unit tests do not prove hardware application or rollback behavior.
-Live inventory confirms validate:1.1 and rollback-on-error, while candidate and
-confirmed-commit are absent. The guarded `lab-running` transaction is therefore
-available after an exact plan review. Candidate/confirmed-commit remains preferred
-when a router advertises it.
+Schema qualification checks the seven shipped exact model/submodule digests through
+`get-schema` and requires validate:1.1. Test-only checks the generated patch against
+the device's schema constraints. Matching a platform name or version is insufficient.
 
-The current task's loaded MCP process still exposes the older read-only tools.
-Its native credential is available there, while the shell test process cannot access
-that credential. Therefore no inline validate RPC, edit-config or commit was issued
-by this development run. The direct validation helper was attempted and failed
-before NETCONF connection because its native credential was unavailable. After loading the updated plugin, use the inline validation
-tool first. Installation is intentionally deferred at the user's request.
-Runningâ†’startup persistence is a separate operation.
+`validate_configuration_csv` reads running for reconciliation and sends only the
+patch with `default-operation=merge`, `test-option=test-only`, and
+`error-option=stop-on-error`. It does not round-trip the complete get-config tree.
+The standalone validation method does not re-read a running digest after this RPC.
+`build`, used during prepare/apply, does compare before/after running digests;
+prepare additionally checks that its initial baseline remains stable.
 
-Reference: https://www.rfc-editor.org/rfc/rfc6241.html#section-8.6.5.1
+Fingerprints normalize the known OpenConfig native-vlan retrieval artifact and
+exactly equivalent IOS XE legacy aliases. Nonsecret verification excludes secret
+nodes; it is not proof that a newly supplied key authenticates successfully.
 
-`validate_adapter_fixture` provides controlled GCM/CBC probes using an unused
-Tunnel and documentation addresses. It runs inline validate only and cannot create
-an apply plan. `scripts/validate_adapter.py` exposes the same probe under the local
-user account without installation. These probes are schema tests, not production
-parameters or live forwarding tests.
+Apply prechecks require the actual client's local IPv4 socket address within a
+reviewed management prefix, exact global operational routes with next-hop evidence
+for management prefixes, non-tunnel return/ISP paths, source state/address and PSK
+availability. Required operational models/revisions are interfaces-oper 2021-03-01,
+crypto-oper 2021-03-01 and ietf-routing 2015-05-25. Unknown evidence blocks.
 
-Schema fixtures allow replace_named only in the proposed inline validation input.
-This accommodates existing ingress policies/objects without altering running config.
-fixture_only still prevents build/apply. Production CSV conflicts still reject by
-default and require an explicit operator-selected replace_named and reviewed diff.
+## Reconciliation and conflict handling
 
-## Validation architecture
+Tunnel create/reuse is checked against fresh inventory. Reuse needs a reviewed
+change scope and retains unrelated interface/TCP/tunnel fields; shutdown is removed
+on the selected reused tunnel. Generated named objects must match or have the
+explicit `existing_objects_action=replace_named` choice and a reviewed exact diff.
+Unrelated interfaces, keyring peers and management routes are preserved.
 
-The IOS XE adapter reads running for reconciliation and a public diff, then submits
-only the generated patch to running using edit-config with test-option=test-only,
-default-operation=merge and error-option=stop-on-error. RFC 6241 validate:1.1 defines
-test-only as validation without attempting to set. A successful RPC is the validation
-result. Running digests are compared after test-only. The fingerprint excludes only
-the confirmed IOS XE retrieval artifact where an existing OpenConfig
-switched-vlan/config/native-vlan leaf becomes visible after test-only; native IOS XE
-and every Secure Access-managed scope remain strict. The semantic comparison also
-accepts duplicated IOS XE legacy aliases only when they exactly equal the canonical
-local-ip, tunnel-choice, profile-option/name, or interface-list value. Prepare/apply
-also perform their own locked baseline and candidate checks.
+PBR bypasses are explicit CSV destinations, never automatically inferred. ACL
+sequence reuse must preserve unique keys and desired evaluation order; otherwise
+rules are resequenced. The patch and inverse reconcile keyed ACEs, including stale
+rules, rather than replacing a referenced ACL root.
 
-The code no longer validates a reconstructed full get-config response. That approach
-was rejected because server output is not guaranteed to be a portable configuration
-input: defaults, implicit mandatory nodes, cross-model dependencies and QName prefix
-scope can differ. It also made unrelated device configuration prevent validation.
+Static protected prefixes overlapping management are rejected, including default
+routes. Existing forwarding entries for a protected prefix must belong to the
+selected tunnel set. Competing next hops require a separate approved change, even
+when `replace_named` is selected. PBR leaves existing static/default routes alone
+apart from the generated headend underlay routes.
 
-The transaction engine remains capability-driven. IOS XE renderers/profiles handle
-release-specific YANG differences; the test-only/diff/drift framework is shared by
-supported ISR devices. Exact profile mismatch blocks safely until a compatible
-profile is added. Without candidate, lab-running requires validate, rollback-on-error,
-an exclusive window, a stable baseline, a verified result, and an owned inverse patch.
+## Preparation and approval
 
-validate_adapter_fixture exercises GCM/CBC using the same test-only patch path and
-can never create an apply plan. Debug output remains sanitized and contains no raw
-XML, values or secrets.
+Plans expire after 900 seconds, live only in the MCP process and are one-use after
+consumption. They contain the private payload, baseline and specification. Public
+results contain target, redacted diff, plan ID, approval digest and transaction mode.
+A restart loses plans. Drift, input changes, expiry or uncertainty requires current
+state inspection and a new plan/approval, not replay.
 
-Validation evidence: 84 local unit tests passed. Hardware test-only validation with
-the preceding adapter version succeeded for both GCM and CBC fixtures.
+`auto` prefers candidate, then falls back to lab-running when its capabilities are
+available. Select `candidate` explicitly when fallback is unacceptable. Inspect
+`transaction_mode` before approval. A successful standalone test-only validation
+is not authorization to apply. The exclusive window must cover other operators,
+CLI writers and automation as well as this NETCONF session.
+
+## Candidate mode
+
+Requires candidate, validate and confirmed-commit, plus adapter qualification.
+The engine locks running and candidate, checks baseline and clean candidate,
+rechecks prerequisites, rebuilds/test-validates the patch, stages it, verifies the
+candidate and validates it. A nonpersistent confirmed commit starts operational
+checks; only success leads to final commit.
+
+Before commit, only verified owned staged changes may be discarded. After the
+initial commit but before final confirmation, failure attempts cancel/close and
+reconnect comparison. A failed/uncertain final commit is never automatically
+cancelled or replayed; it requires manual state inspection. Do not equate an
+attempted rollback with `rollback_status=verified`.
+
+## Lab-running mode
+
+Requires validate and rollback-on-error, plus adapter qualification. Under running
+lock, the engine rechecks baseline/preconditions, rebuilds the patch and sends
+`edit-config(test-then-set, rollback-on-error)`. Failed or uncertain edits or failed
+configuration verification attempt an owned inverse patch. Inspect its reported
+verification status; rollback is not guaranteed by an RPC attempt.
+
+After nonsecret running verification succeeds, operational failure/timeout leaves
+the configuration installed as `applied_operational_pending`. There is no timed
+confirmed-commit rollback. Investigate and verify the service separately, or use
+an approved recovery procedure. This server has no dedicated postcheck-retry tool.
+
+## Postchecks, timeouts and persistence
+
+Postchecks examine expected nonsecret running, tunnel admin/oper state and nonzero
+input/output counters, headend IKEv2 and inbound/outbound ESP SAs, headend underlay
+through the ISP and management routes. Static active forwarding must use exactly
+the expected active tunnel set, without extra outgoing interfaces. Counter totals
+are not a measurement of fresh traffic, and these checks do not establish every
+application, NAT or failover behavior.
+
+MCP defaults: confirm timeout 180 seconds, postcheck budget 60 seconds. The MCP
+wrapper accepts a budget of 30–300 seconds, timeout at most 600 seconds and at
+least 60 seconds of margin. This wrapper validation also applies to lab-running.
+
+`applied` means success for the implemented mode's checks; `applied_operational_pending`
+means installed but not operationally verified. `failed` and `uncertain` require
+inspection of error/rollback status and actual state. Do not replay a consumed plan.
+All results concern running only: `startup_persisted=false`. Saving to startup is
+an independent authorized operation after acceptance.
+
+Local tests cover reconciliation and mocked transaction behavior. They do not prove
+hardware schema acceptance, live forwarding, rollback or persistence on a deployment
+router. Gather fresh evidence for that device; old task-specific observations are
+not current readiness evidence.

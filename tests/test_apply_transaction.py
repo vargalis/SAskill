@@ -140,5 +140,7 @@ for name,fn in list(globals().items()):
         else:
             def wrapper(self,fn=fn): fn()
             setattr(TransactionTests,name,wrapper)
+        # The generated unittest methods own collection in both runners.
+        fn.__test__=False
 del fn, name
 if __name__=='__main__': unittest.main()

@@ -1,54 +1,76 @@
-# CSV configuration templates
+# CSV configuration reference
 
-Schema version 2 input is UTF-8 BOM CSV with semicolon delimiter and columns
-section;item;field;value;required;description. Fill value only. For multiple
-networks, copy a list row and assign a distinct positive item number. For
-multiple tunnels, copy its field group with a distinct item. Never use formulas
-fields outside the test connection block. The IOS XE test template includes
-NETCONF credentials and redacted PSK input fields. Required flags are explanatory,
-not validation authority.
+Full instructions: [English](user-guide.en.md) · [Русский](user-guide.ru.md).
 
-Agent creates CSV, prefills ONLY user-confirmed values and sanitized authorized
-live discovery. Label observed/suggested values in descriptions; do not assume
-source interfaces, WAN IP, crypto defaults, bypass sets or fallback confirmation.
-Supply your source networks, ISP gateway, and management prefixes. Use destination
-0.0.0.0/0 only when all destinations should be directed through the tunnel.
-TunnelN and create/reuse are explicit choices; Tunnel1 is not hard-coded.
-`network.router_wan_ip` is the selected tunnel source interface IPv4 address and
-is rendered as `crypto ikev2 policy ... match address local`. In PBR mode, one or
-two tunnel row groups are accepted; their item order defines primary then secondary.
+## Format and modes
 
-Read the completed file locally and submit its text to preview_configuration_csv.
-The tool is stateless/offline and never reads paths or opens a network session.
-Pass fresh occupied tunnel IDs from separate authorized routing_summary.
-Blank required values produce missing_fields, unknown keys/duplicate rows and
-invalid topology produce errors. Do not send secret-containing files to a tool.
-Nonblank values are validated before rendering. Errors include the CSV row,
-section, item, field, accepted format or values, and allowed numeric range. Checks
-cover IPv4/CIDR syntax, interface names, enum choices, crypto compatibility,
-lifetimes, MTU/MSS, tunnel identity, duplicate list values, and reuse controls.
+Use schema version `2`, UTF-8 (BOM accepted), semicolon delimiter, and exactly:
 
-Before creating a template, ask the user to choose Basic or Advanced. Basic is
-recommended and omits fields with built-in Cisco defaults. Advanced includes every
-supported field. The selected mode is recorded in meta.template_mode. A Basic CSV
-expands to the same complete validated model by inserting the documented defaults;
-it does not weaken validation or authorize device changes.
+```text
+section;item;field;value;required;description
+```
 
-For multiple tunnel item groups, enter common values in the first tunnel. Blank
-source_interface, unnumbered_interface, mtu, and tcp_mss fields in later tunnel
-items inherit the first tunnel value. Unique or topology-sensitive fields such as
-interface_name, headend, local_identity, numbered address, action, and distance do
-not inherit. The preview reports every inherited field.
-For reuse inspect current vs proposed parameters before reuse_confirmed=true.
-CSV does not establish a reconciled baseline or qualified device diff.
+Choose Basic or Advanced before requesting `create_configuration_csv`. Basic hides
+built-in values; Advanced exposes them. Edit `value`, preserve field names and
+enums, and replace `<<< REQUIRED >>>`. Keep `required` as yes/no and descriptions
+nonempty. Required flags are explanatory; the importer enforces its own rules.
+Formulas in nonsecret fields, unknown fields and duplicate field keys are rejected.
 
-Present the imported public spec and CLI/XML previews, then collect any required
-plan confirmation. Do not apply automatically on file import. No device apply
-tool exists: transaction and qualified schemas/rollback remain required.
-FTD CSV is a separate future planning template (manager type, manager host,
-device identifier/version/template name). It never produces IOS XE config and
-does not imply FMC/FDM API support. Implement FTD templates and adapter only
-after selecting manager/version and discovering actual capabilities.
+Lists use positive, unique item numbers. Copy a complete tunnel field group for
+another tunnel. PBR supports one or two tunnels in numeric item order; static
+supports up to eight. Examples are illustrative and must not be applied unchanged.
 
+**Current Basic/static limitation:** Basic inserts `pbr.failure_behavior=normal-routing`
+even with static mode, which the importer rejects. Use Advanced for static and
+leave PBR failure behavior plus source/bypass/ingress values blank.
 
-Current application workflow: see [netconf-apply.md](netconf-apply.md). `validate_configuration_csv` checks inline config without edits, then `prepare_configuration_apply` / `apply_configuration_plan` use a reviewed one-use transaction. Conflicts default to rejection; `existing_objects_action=replace_named` explicitly selects generated named objects for replacement.
+## Secrets in the current test build
+
+`connection.username` and `connection.password` are required. Each tunnel requires
+`psk_mode` and `psk_format`; shared mode requires `shared_psk`, while split requires
+both `local_psk` and `remote_psk`. Format is plain, type6 or hex, common to both split
+keys. CSV input is sensitive and is passed to MCP tools. Output redaction does not
+redact the source file or make tool inputs secret-free. Keep filled files outside
+source control and follow the handling requirements in the guides.
+
+The adapter supports vault/device keys internally, but the current importer does
+not provide a vault-only CSV path. Changing the required column does not bypass it.
+Discovery tools separately need stored/environment login credentials.
+
+## Routing, interfaces and inheritance
+
+`source_prefix` identifies PBR sources; `destination_prefix` identifies destinations.
+Destination `0.0.0.0/0` means any destination for matching PBR sources. Optional
+`bypass_prefix` destinations create deny entries before permits: deny means normal
+routing, not dropping. No management/headend bypass is inserted automatically.
+The only fallback is `normal-routing`; tracking/fail-closed are unsupported.
+
+`network.router_wan_ip` must match the selected tunnel source interface address.
+Tunnel selection is explicit `TunnelN` plus create/reuse. Reuse additionally needs
+`reuse_confirmed=true` and a reviewed `change_scope`; it does not authorize apply.
+Choose exactly one numbered `address` or `unnumbered_interface`. New source loopback
+addresses must use /32. CSV MTU is 576–1390, MSS 536–1350 with MSS ≤ MTU−40.
+
+Later tunnel items inherit blank source_interface, unnumbered_interface, mtu and
+tcp_mss from the first item. They do not inherit tunnel number, headend, identity,
+numbered address, action or distance. Review `inherited_fields` in the result.
+
+Static protected prefixes cannot overlap management prefixes. Competing configured
+next hops for a protected prefix are rejected during device reconciliation and
+require a separate approved change; replace_named does not override this gate.
+
+## Preview, validate and apply
+
+Read the completed local file and pass its text to `preview_configuration_csv`;
+the tool accepts text, not a filesystem path. Supply fresh occupied tunnel IDs when
+available. Resolve `missing_fields`, row-specific `errors` and reported inheritance.
+Review the public spec and previews; offline `apply_ready=false` is expected.
+
+Next use `validate_configuration_csv` (generated patch, NETCONF edit-config test-only),
+then `prepare_configuration_apply` and explicit exact-diff/digest approval before
+`apply_configuration_plan`. See [transaction details](netconf-apply.md).
+Matching objects are reused; differences reject unless the operator deliberately
+selects `existing_objects_action=replace_named` and reviews the resulting diff.
+
+FTD templates contain manager type/host, device ID, version and template name only.
+They do not generate IOS XE configuration, connect to an FTD manager or apply policy.

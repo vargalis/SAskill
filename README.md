@@ -1,6 +1,21 @@
 # Agent for SecureAccess
 
-Public CSV input → preview → device inline validation → reviewed one-use NETCONF
+## Complete usage guides / Полные руководства
+
+- [English: all steps before, during and after using the skill](docs/user-guide.en.md)
+- [Русский: все шаги до, во время и после использования skill](docs/user-guide.ru.md)
+
+The guides cover router/workstation prerequisites, installation on Windows and
+macOS/Linux, environment configuration, SSH trust, credentials, discovery, CSV,
+validation, exact-plan approval, transaction modes, recovery and separate startup
+persistence. Start there before connecting to a device.
+
+**Current test-build constraints:** filled CSVs contain required login credentials
+and PSKs; output redaction does not make tool input secret-free. Vault-only CSV
+input is not currently supported. Use Advanced for static routing because Basic
+inserts a PBR-only default. See the guides for the complete limitations.
+
+Private CSV input → preview → device test-only validation → reviewed one-use NETCONF
 transaction. The native IOS XE adapter implements IKEv2/IPsec, selected VTI,
 static routing and source-based PBR. FTD FMC/FDM template application is a later phase.
 
@@ -11,7 +26,7 @@ static routing and source-based PBR. FTD FMC/FDM template application is a later
 - validate_configuration_csv: reconciled patch, NETCONF edit-config test-only.
 - validate_adapter_fixture: controlled GCM/CBC schema probes; no application path.
 - prepare_configuration_apply: public exact diff and private expiring plan.
-- tunnel_psk_status: confirms matching native-vault entries without exposing values; the test build can instead take PSKs from CSV.
+- tunnel_psk_status: confirms matching native-vault entries without exposing values; it does not verify CSV/device keys.
 - apply_configuration_plan: approved candidate transaction or guarded lab-running transaction.
 
 See [docs/netconf-apply.md](docs/netconf-apply.md) for scope, conflict handling,
@@ -22,9 +37,11 @@ The wizard remains optional. Legacy YAML CLI is read-only; no CLI configuration 
 
 Exact model/submodule digests are checked against NETCONF get-schema. Current
 device features/deviations are enforced by server inline validation. Missing or
-unknown pre/postcheck evidence blocks or rolls back. Credentials/PSKs/private XML
+unknown precheck evidence blocks. Candidate postcheck failures trigger rollback attempts;
+lab-running retains verified configuration when operational checks are pending. Credentials/PSKs/private XML
 are redacted from previews, results, diffs, diagnostics, and logs. The test build accepts
-NETCONF credentials and shared or split PSKs directly in CSV; native stores remain optional.
+NETCONF credentials and shared or split PSKs directly in CSV and currently requires
+those fields. Stored/environment login credentials are separately needed for discovery.
 Candidate and confirmed commit are preferred. On a lab ISR without them, the adapter
 requires validate and rollback-on-error, locks running, uses test-then-set, verifies
 the resulting nonsecret state, and retains an inverse patch for failed writes. Hardware schema/SA/
@@ -34,7 +51,7 @@ rollback evidence is distinct from passing unit tests.
 
 Run scripts/validate_adapter.py with the plugin Python runtime under the user whose
 native secret store contains the enrolled credentials. It performs inline GCM/CBC
-schema tests only. scripts/validate_csv.py validates a filled public CSV the same way.
+schema tests only. scripts/validate_csv.py validates a filled private CSV through test-only.
 Reload the updated plugin to use the latest MCP diagnostics.
 
 ### Local target configuration
